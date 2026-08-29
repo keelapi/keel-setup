@@ -1,0 +1,1621 @@
+{
+  "$defs": {
+    "AllCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/LeafCondition"
+              }
+            ]
+          },
+          "title": "All",
+          "type": "array"
+        }
+      },
+      "required": [
+        "all"
+      ],
+      "title": "AllCondition",
+      "type": "object"
+    },
+    "AllowRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "allow",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action"
+      ],
+      "title": "AllowRule",
+      "type": "object"
+    },
+    "AnyCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "any": {
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/LeafCondition"
+              }
+            ]
+          },
+          "title": "Any",
+          "type": "array"
+        }
+      },
+      "required": [
+        "any"
+      ],
+      "title": "AnyCondition",
+      "type": "object"
+    },
+    "ApprovalRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "delegated_approval": {
+          "default": false,
+          "title": "Delegated Approval",
+          "type": "boolean"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "external_workflow": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Workflow"
+        },
+        "group_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group Id"
+        },
+        "group_slug": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group Slug"
+        },
+        "min_approvals": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Min Approvals",
+          "type": "integer"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "separation_of_duties": {
+          "default": false,
+          "title": "Separation Of Duties",
+          "type": "boolean"
+        },
+        "service_principal_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Principal Id"
+        },
+        "team_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team Id"
+        },
+        "team_slug": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Team Slug"
+        },
+        "timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "org_role",
+            "approver_group",
+            "team",
+            "user",
+            "email",
+            "service_principal"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        }
+      },
+      "required": [
+        "type",
+        "timeout_seconds"
+      ],
+      "title": "ApprovalRequirement",
+      "type": "object"
+    },
+    "AttestationRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "attestor": {
+          "minLength": 1,
+          "title": "Attestor",
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attestor",
+        "timeout_seconds"
+      ],
+      "title": "AttestationRequirement",
+      "type": "object"
+    },
+    "ConstrainMaxOutputTokensParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cap_tokens": {
+          "exclusiveMinimum": 0,
+          "title": "Cap Tokens",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cap_tokens"
+      ],
+      "title": "ConstrainMaxOutputTokensParams",
+      "type": "object"
+    },
+    "ConstrainMaxOutputTokensRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "constrain_max_output_tokens",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/ConstrainMaxOutputTokensParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "ConstrainMaxOutputTokensRule",
+      "type": "object"
+    },
+    "ConstrainPermitLifetimeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "max_ttl_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Max Ttl Seconds",
+          "type": "integer"
+        },
+        "not_after": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Not After"
+        }
+      },
+      "required": [
+        "max_ttl_seconds"
+      ],
+      "title": "ConstrainPermitLifetimeParams",
+      "type": "object"
+    },
+    "ConstrainPermitLifetimeRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "constrain_permit_lifetime",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/ConstrainPermitLifetimeParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "ConstrainPermitLifetimeRule",
+      "type": "object"
+    },
+    "ConstrainPermitTargetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_operations": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Operations"
+        },
+        "allowed_providers": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Providers"
+        },
+        "allowed_resource_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Resource Ids"
+        },
+        "allowed_resource_types": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Resource Types"
+        }
+      },
+      "title": "ConstrainPermitTargetParams",
+      "type": "object"
+    },
+    "ConstrainPermitTargetRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "constrain_permit_target",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/ConstrainPermitTargetParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "ConstrainPermitTargetRule",
+      "type": "object"
+    },
+    "ConstrainWorkAuthorityParams": {
+      "additionalProperties": false,
+      "properties": {
+        "automatic_review_threshold_minor": {
+          "minimum": 0,
+          "title": "Automatic Review Threshold Minor",
+          "type": "integer"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "max_uses": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Max Uses",
+          "type": "integer"
+        },
+        "max_validity_seconds": {
+          "maximum": 31536000,
+          "minimum": 1,
+          "title": "Max Validity Seconds",
+          "type": "integer"
+        },
+        "parent_review_mode": {
+          "enum": [
+            "review_every_request",
+            "review_first_request_per_agent",
+            "allow_matching_automatically"
+          ],
+          "title": "Parent Review Mode",
+          "type": "string"
+        },
+        "purpose_digests": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose Digests"
+        },
+        "recipient_digests": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 1000,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipient Digests"
+        },
+        "semantic_action": {
+          "const": "payment.execute",
+          "title": "Semantic Action",
+          "type": "string"
+        },
+        "value_max_minor": {
+          "minimum": 1,
+          "title": "Value Max Minor",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "semantic_action",
+        "max_uses",
+        "value_max_minor",
+        "currency",
+        "automatic_review_threshold_minor",
+        "max_validity_seconds",
+        "parent_review_mode"
+      ],
+      "title": "ConstrainWorkAuthorityParams",
+      "type": "object"
+    },
+    "ConstrainWorkAuthorityRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "constrain_work_authority",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/ConstrainWorkAuthorityParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "ConstrainWorkAuthorityRule",
+      "type": "object"
+    },
+    "DenyIfCostExceedsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cap_micros": {
+          "minimum": 0,
+          "title": "Cap Micros",
+          "type": "integer"
+        },
+        "window": {
+          "enum": [
+            "daily",
+            "weekly",
+            "monthly",
+            "quarterly",
+            "request"
+          ],
+          "title": "Window",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "cap_micros"
+      ],
+      "title": "DenyIfCostExceedsParams",
+      "type": "object"
+    },
+    "DenyIfCostExceedsRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny_if_cost_exceeds",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/DenyIfCostExceedsParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "DenyIfCostExceedsRule",
+      "type": "object"
+    },
+    "DenyIfModelNotInParams": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowed",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "title": "DenyIfModelNotInParams",
+      "type": "object"
+    },
+    "DenyIfModelNotInRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny_if_model_not_in",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/DenyIfModelNotInParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "DenyIfModelNotInRule",
+      "type": "object"
+    },
+    "DenyIfProjectedMonthlyRatioExceedsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "monthly_cap_micros": {
+          "exclusiveMinimum": 0,
+          "title": "Monthly Cap Micros",
+          "type": "integer"
+        },
+        "projection": {
+          "enum": [
+            "current",
+            "estimated"
+          ],
+          "title": "Projection",
+          "type": "string"
+        },
+        "ratio_pct": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Ratio Pct",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ratio_pct",
+        "monthly_cap_micros",
+        "projection"
+      ],
+      "title": "DenyIfProjectedMonthlyRatioExceedsParams",
+      "type": "object"
+    },
+    "DenyIfProjectedMonthlyRatioExceedsRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny_if_projected_monthly_ratio_exceeds",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/DenyIfProjectedMonthlyRatioExceedsParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "DenyIfProjectedMonthlyRatioExceedsRule",
+      "type": "object"
+    },
+    "DenyIfRateExceedsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "max_requests": {
+          "exclusiveMinimum": 0,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Window Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "window_seconds",
+        "max_requests"
+      ],
+      "title": "DenyIfRateExceedsParams",
+      "type": "object"
+    },
+    "DenyIfRateExceedsRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny_if_rate_exceeds",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/DenyIfRateExceedsParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "DenyIfRateExceedsRule",
+      "type": "object"
+    },
+    "DenyIfSpikeDetectedParams": {
+      "additionalProperties": false,
+      "properties": {
+        "baseline_days": {
+          "exclusiveMinimum": 0,
+          "title": "Baseline Days",
+          "type": "integer"
+        },
+        "multiplier": {
+          "exclusiveMinimum": 0.0,
+          "title": "Multiplier",
+          "type": "number"
+        }
+      },
+      "required": [
+        "multiplier",
+        "baseline_days"
+      ],
+      "title": "DenyIfSpikeDetectedParams",
+      "type": "object"
+    },
+    "DenyIfSpikeDetectedRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny_if_spike_detected",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/DenyIfSpikeDetectedParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "DenyIfSpikeDetectedRule",
+      "type": "object"
+    },
+    "DenyRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "deny",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action"
+      ],
+      "title": "DenyRule",
+      "type": "object"
+    },
+    "LeafCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "minLength": 1,
+          "title": "Field",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "eq",
+            "neq",
+            "in",
+            "not_in",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "contains",
+            "exists",
+            "starts_with",
+            "ends_with",
+            "matches_regex",
+            "len_gt",
+            "len_gte",
+            "len_lt",
+            "len_lte"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "field",
+        "op"
+      ],
+      "title": "LeafCondition",
+      "type": "object"
+    },
+    "NotCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "not": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "Not"
+        }
+      },
+      "required": [
+        "not"
+      ],
+      "title": "NotCondition",
+      "type": "object"
+    },
+    "PreviewRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "preview",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action"
+      ],
+      "title": "PreviewRule",
+      "type": "object"
+    },
+    "RequireBudgetEnvelopeRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "require_budget_envelope",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action"
+      ],
+      "title": "RequireBudgetEnvelopeRule",
+      "type": "object"
+    },
+    "RequireHumanReviewRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "require_human_review",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action"
+      ],
+      "title": "RequireHumanReviewRule",
+      "type": "object"
+    },
+    "ThrottleIfRateExceedsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "max_requests": {
+          "exclusiveMinimum": 0,
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "window_seconds": {
+          "exclusiveMinimum": 0,
+          "title": "Window Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "window_seconds",
+        "max_requests"
+      ],
+      "title": "ThrottleIfRateExceedsParams",
+      "type": "object"
+    },
+    "ThrottleIfRateExceedsRule": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "const": "throttle_if_rate_exceeds",
+          "title": "Action",
+          "type": "string"
+        },
+        "approval_requirement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "if": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/LeafCondition"
+            }
+          ],
+          "title": "If"
+        },
+        "params": {
+          "$ref": "#/$defs/ThrottleIfRateExceedsParams"
+        },
+        "require_attestation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttestationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "if",
+        "action",
+        "params"
+      ],
+      "title": "ThrottleIfRateExceedsRule",
+      "type": "object"
+    }
+  },
+  "$id": "https://raw.githubusercontent.com/keelapi/keel-skills/main/keel-policy/reference/policy-document.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "rules": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "allow": "#/$defs/AllowRule",
+            "constrain_max_output_tokens": "#/$defs/ConstrainMaxOutputTokensRule",
+            "constrain_permit_lifetime": "#/$defs/ConstrainPermitLifetimeRule",
+            "constrain_permit_target": "#/$defs/ConstrainPermitTargetRule",
+            "constrain_work_authority": "#/$defs/ConstrainWorkAuthorityRule",
+            "deny": "#/$defs/DenyRule",
+            "deny_if_cost_exceeds": "#/$defs/DenyIfCostExceedsRule",
+            "deny_if_model_not_in": "#/$defs/DenyIfModelNotInRule",
+            "deny_if_projected_monthly_ratio_exceeds": "#/$defs/DenyIfProjectedMonthlyRatioExceedsRule",
+            "deny_if_rate_exceeds": "#/$defs/DenyIfRateExceedsRule",
+            "deny_if_spike_detected": "#/$defs/DenyIfSpikeDetectedRule",
+            "preview": "#/$defs/PreviewRule",
+            "require_budget_envelope": "#/$defs/RequireBudgetEnvelopeRule",
+            "require_human_review": "#/$defs/RequireHumanReviewRule",
+            "throttle_if_rate_exceeds": "#/$defs/ThrottleIfRateExceedsRule"
+          },
+          "propertyName": "action"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/AllowRule"
+          },
+          {
+            "$ref": "#/$defs/DenyRule"
+          },
+          {
+            "$ref": "#/$defs/PreviewRule"
+          },
+          {
+            "$ref": "#/$defs/RequireHumanReviewRule"
+          },
+          {
+            "$ref": "#/$defs/DenyIfCostExceedsRule"
+          },
+          {
+            "$ref": "#/$defs/DenyIfRateExceedsRule"
+          },
+          {
+            "$ref": "#/$defs/DenyIfSpikeDetectedRule"
+          },
+          {
+            "$ref": "#/$defs/DenyIfModelNotInRule"
+          },
+          {
+            "$ref": "#/$defs/ConstrainMaxOutputTokensRule"
+          },
+          {
+            "$ref": "#/$defs/ConstrainPermitLifetimeRule"
+          },
+          {
+            "$ref": "#/$defs/ConstrainPermitTargetRule"
+          },
+          {
+            "$ref": "#/$defs/ConstrainWorkAuthorityRule"
+          },
+          {
+            "$ref": "#/$defs/DenyIfProjectedMonthlyRatioExceedsRule"
+          },
+          {
+            "$ref": "#/$defs/ThrottleIfRateExceedsRule"
+          },
+          {
+            "$ref": "#/$defs/RequireBudgetEnvelopeRule"
+          }
+        ]
+      },
+      "title": "Rules",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "rules"
+  ],
+  "title": "Keel PolicyDocument",
+  "type": "object"
+}

@@ -1,0 +1,27 @@
+name: Public setup bundle
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify release allowlist and hashes
+        run: python scripts/check_release_bundle.py
+      - name: Run setup tests
+        run: python -m unittest discover -s keel-setup/tests -p 'test_*.py'
+      - name: Run policy tests
+        run: python -m unittest discover -s keel-policy/tests -p 'test_*.py'
+      - name: Run shared tests
+        working-directory: shared/scripts
+        run: python -m unittest discover -s . -p 'test_*.py'

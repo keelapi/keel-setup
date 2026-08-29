@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keelapi.com/schemas/enforceability-report.v1.json",
+  "title": "Keel policy enforceability report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "intent", "policy", "readback", "enforceability", "activation_effect", "blocked_requests", "human_next_step"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "intent": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 1000}, "maxItems": 100},
+    "policy": {"type": ["object", "null"]},
+    "readback": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 2000}, "maxItems": 200},
+    "enforceability": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule_reference", "required_fact", "field", "surface", "provenance", "status", "safe_outcome", "reason", "replacement_field"],
+        "properties": {
+          "rule_reference": {"type": "string", "minLength": 1, "maxLength": 256},
+          "required_fact": {"type": "string", "minLength": 1, "maxLength": 512},
+          "field": {"type": ["string", "null"], "maxLength": 512},
+          "surface": {"type": "string", "minLength": 1, "maxLength": 128},
+          "provenance": {"enum": ["keel_derived", "connector_asserted", "caller_asserted", "human_asserted", "unavailable", "unresolved"]},
+          "status": {"enum": ["trusted", "untrusted", "unavailable", "unresolved"]},
+          "safe_outcome": {"enum": ["auto_allow", "review", "deny", "proposal_only", "blocked"]},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "replacement_field": {"type": ["string", "null"], "maxLength": 512}
+        }
+      }
+    },
+    "activation_effect": {"enum": ["narrows", "widens", "ambiguous", "unchanged", "unresolved"]},
+    "blocked_requests": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request", "reason"],
+        "properties": {
+          "request": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+        }
+      }
+    },
+    "human_next_step": {"type": "string", "minLength": 1, "maxLength": 2000}
+  }
+}

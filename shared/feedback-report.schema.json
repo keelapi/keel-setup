@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keelapi.com/schemas/feedback-report.v1.json",
+  "title": "Keel feedback report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["category", "summary", "intended_task", "expected_behavior", "observed_behavior", "desired_outcome", "surface", "blocker", "evidence_level", "coding_agent", "skill_version", "keel_release", "decision_classification", "optional_context"],
+  "properties": {
+    "category": {"enum": ["bug", "feature_request", "onboarding_confusion", "documentation", "policy_request", "integration_request", "security_concern", "compliment", "other"]},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 300},
+    "intended_task": {"type": "string", "minLength": 1, "maxLength": 1500},
+    "expected_behavior": {"type": ["string", "null"], "maxLength": 1500},
+    "observed_behavior": {"type": ["string", "null"], "maxLength": 3000},
+    "desired_outcome": {"type": ["string", "null"], "maxLength": 1500},
+    "surface": {"enum": ["setup", "policy", "mcp", "execute", "permit", "dashboard", "verifier", "documentation", "other"]},
+    "blocker": {"enum": [null, "trusted_fact_unavailable", "adapter_unavailable", "governance_action_unavailable", "policy_not_expressible", "execution_surface_unsupported", "runtime_error", "verification_failed", "documentation_gap", "entitlement_blocked", "unknown"]},
+    "evidence_level": {"enum": ["runtime_observed", "source_inspected", "human_asserted", "proposed", "unresolved"]},
+    "coding_agent": {"type": ["string", "null"], "maxLength": 100},
+    "skill_version": {"type": ["string", "null"], "maxLength": 100},
+    "keel_release": {"type": ["string", "null"], "maxLength": 100},
+    "decision_classification": {"type": ["string", "null"], "maxLength": 300},
+    "optional_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "tool_name", "source_locations", "environment_details"],
+      "properties": {
+        "provider": {"type": ["string", "null"], "maxLength": 100},
+        "tool_name": {"type": ["string", "null"], "maxLength": 200},
+        "source_locations": {"type": "array", "maxItems": 20, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
+        "environment_details": {"type": ["string", "null"], "maxLength": 500}
+      }
+    }
+  }
+}

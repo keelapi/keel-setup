@@ -1,0 +1,13 @@
+{
+  "bundle_schema_version": "keel.public_setup_bundle.v1",
+  "included_roots": [
+    "keel-policy",
+    "keel-setup",
+    "shared"
+  ],
+  "included_files": [
+    "tools/public_surface.json"
+  ],
+  "source_commit": "67f4e15a095871dd2cee78ad72f1eef9373450d5",
+  "source_repository": "keelapi/keel-skills"
+}

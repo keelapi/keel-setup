@@ -1,0 +1,119 @@
+{
+  "name": "Stripe refunds with project-owner review above $100 (Production)",
+  "rules": [
+    {
+      "if": {
+        "all": [
+          {
+            "field": "context._keel.action_envelope.connector.identity.value",
+            "op": "eq",
+            "value": "stripe"
+          },
+          {
+            "field": "context._keel.action_envelope.connector.tool_name.value",
+            "op": "eq",
+            "value": "delete_customer"
+          }
+        ]
+      },
+      "action": "deny"
+    },
+    {
+      "if": {
+        "all": [
+          {
+            "field": "context._keel.action_envelope.connector.identity.value",
+            "op": "eq",
+            "value": "stripe"
+          },
+          {
+            "field": "context._keel.action_envelope.connector.tool_name.value",
+            "op": "in",
+            "value": [
+              "create_refund",
+              "refund_payment"
+            ]
+          },
+          {
+            "field": "context._keel.action_envelope.financial.amount_usd_micros.state",
+            "op": "in",
+            "value": [
+              "absent",
+              "unknown",
+              "not_applicable"
+            ]
+          }
+        ]
+      },
+      "action": "require_human_review",
+      "require_attestation": {
+        "attestor": "project_owner",
+        "timeout_seconds": 3600
+      }
+    },
+    {
+      "if": {
+        "all": [
+          {
+            "field": "context._keel.action_envelope.connector.identity.value",
+            "op": "eq",
+            "value": "stripe"
+          },
+          {
+            "field": "context._keel.action_envelope.connector.tool_name.value",
+            "op": "in",
+            "value": [
+              "create_refund",
+              "refund_payment"
+            ]
+          },
+          {
+            "field": "context._keel.action_envelope.financial.amount_usd_micros.state",
+            "op": "eq",
+            "value": "present"
+          },
+          {
+            "field": "context._keel.action_envelope.financial.amount_usd_micros.value",
+            "op": "gt",
+            "value": 100000000
+          }
+        ]
+      },
+      "action": "require_human_review",
+      "require_attestation": {
+        "attestor": "project_owner",
+        "timeout_seconds": 3600
+      }
+    },
+    {
+      "if": {
+        "all": [
+          {
+            "field": "context._keel.action_envelope.connector.identity.value",
+            "op": "eq",
+            "value": "stripe"
+          },
+          {
+            "field": "context._keel.action_envelope.connector.tool_name.value",
+            "op": "in",
+            "value": [
+              "create_refund",
+              "refund_payment"
+            ]
+          },
+          {
+            "field": "context._keel.action_envelope.financial.amount_usd_micros.state",
+            "op": "eq",
+            "value": "present"
+          },
+          {
+            "field": "context._keel.action_envelope.financial.amount_usd_micros.value",
+            "op": "lte",
+            "value": 100000000
+          }
+        ]
+      },
+      "action": "allow"
+    }
+  ]
+}

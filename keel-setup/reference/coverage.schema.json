@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keelapi.com/schemas/skill-coverage-report.v1.json",
+  "title": "Keel source coverage report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_basis", "application_revision", "paths", "does_not_establish"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "report_basis": {"const": "source_inventory"},
+    "application_revision": {"type": ["string", "null"], "maxLength": 128},
+    "paths": {
+      "type": "array",
+      "maxItems": 2000,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "line", "surface", "signal", "status", "evidence_level", "confidence", "uncertainties"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 512},
+          "line": {"type": "integer", "minimum": 1},
+          "surface": {"enum": ["model", "mcp", "direct_api", "database", "payment", "identity", "background", "browser", "code_execution", "unknown"]},
+          "signal": {"type": "string", "minLength": 1, "maxLength": 256},
+          "status": {"enum": ["protected", "governed_routed", "intentionally_unprotected", "unresolved"]},
+          "evidence_level": {"enum": ["runtime_observed", "source_inspected", "human_asserted", "unresolved"]},
+          "confidence": {"enum": ["high", "medium", "low"]},
+          "uncertainties": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}, "maxItems": 20}
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {"enum": ["deployment", "runtime_frequency", "trusted_semantics", "downstream_effect", "bypass_absence", "whole_application_protection", "independent_verification"]}
+    }
+  }
+}

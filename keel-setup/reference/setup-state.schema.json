@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keelapi.com/schemas/skill-setup-state.v1.json",
+  "title": "Keel setup invocation state",
+  "description": "Local, git-ignored, non-secret continuity for .keel/setup-state.json. This file is local workflow state, not Keel evidence, and never carries authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "invocation_count", "stage", "updated_at"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "invocation_count": {"type": "integer", "minimum": 1, "maximum": 100000},
+    "pinned_skill_ref": {"type": ["string", "null"], "maxLength": 128},
+    "stage": {
+      "enum": [
+        "discovery",
+        "waiting_for_human",
+        "integration_ready",
+        "state_d_verified",
+        "mapping_proposed",
+        "waiting_for_mapping_activation",
+        "state_f_verified",
+        "verified",
+        "drifted",
+        "blocked"
+      ]
+    },
+    "provider": {"type": ["string", "null"], "maxLength": 128},
+    "allowed_model": {"type": ["string", "null"], "maxLength": 256},
+    "denied_model": {"type": ["string", "null"], "maxLength": 256},
+    "application_revision": {"type": ["string", "null"], "maxLength": 128},
+    "changed_paths": {
+      "type": "array",
+      "maxItems": 500,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "discovered_mcp_source_identifiers": {
+      "type": "array",
+      "maxItems": 500,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 256}
+    },
+    "last_verification": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["observed_at", "allowed_classification", "denied_classification", "evidence_level"],
+      "properties": {
+        "observed_at": {"type": "string", "format": "date-time", "maxLength": 64},
+        "allowed_classification": {
+          "enum": [
+            "allowed_completed",
+            "keel_denied",
+            "provider_dispatch_failed_after_allow",
+            "freshness_failed",
+            "replay_rejected",
+            "client_authentication_failed",
+            "transport_failed",
+            "malformed_response",
+            "unexpected"
+          ]
+        },
+        "denied_classification": {
+          "enum": [
+            "allowed_completed",
+            "keel_denied",
+            "provider_dispatch_failed_after_allow",
+            "freshness_failed",
+            "replay_rejected",
+            "client_authentication_failed",
+            "transport_failed",
+            "malformed_response",
+            "unexpected"
+          ]
+        },
+        "evidence_level": {"const": "runtime_observed"}
+      }
+    },
+    "last_drift_audit_invocation": {"type": ["integer", "null"], "minimum": 1, "maximum": 100000},
+    "last_maintenance_review_invocation": {"type": ["integer", "null"], "minimum": 1, "maximum": 100000},
+    "created_at": {"type": ["string", "null"], "format": "date-time", "maxLength": 64},
+    "updated_at": {"type": "string", "format": "date-time", "maxLength": 64}
+  }
+}
