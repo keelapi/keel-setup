@@ -1529,7 +1529,7 @@
       "type": "object"
     }
   },
-  "$id": "https://raw.githubusercontent.com/keelapi/keel-skills/main/keel-policy/reference/policy-document.schema.json",
+  "$id": "https://raw.githubusercontent.com/keelapi/keel-setup/main/keel-policy/reference/policy-document.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
