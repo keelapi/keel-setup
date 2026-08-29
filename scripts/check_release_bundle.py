@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = "96eaf2aef2ba3b27a82d7689be83ca21b2b2e49e"
+SOURCE_COMMIT = "e03a89e29e2a1ddf06d897858e9b24be7ad0f61d"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",

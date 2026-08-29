@@ -62,7 +62,9 @@ CREDENTIAL_SHAPES = (
         "carries a credential assignment",
     ),
     (
-        re.compile(r"^(?:ks_|sk-|sk_|pk_|rk_|ghp_|gho_|xox[baprs]-)[A-Za-z0-9_\-]{8,}"),
+        re.compile(
+            r"(?<![A-Za-z0-9_])(?:ks_|sk-|sk_|pk_|rk_|ghp_|gho_|xox[baprs]-)[A-Za-z0-9_\-]{8,}"
+        ),
         "matches a known credential prefix",
     ),
 )

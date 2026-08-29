@@ -12,6 +12,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
@@ -24,20 +25,26 @@ SPEC.loader.exec_module(verify_execute)
 
 class _Handler(BaseHTTPRequestHandler):
     requests: list[dict] = []
-    responses: list[tuple[int, object]] = []
+    responses: list[tuple[int, object] | tuple[int, object, dict[str, str]]] = []
 
     def do_POST(self):  # noqa: N802
         length = int(self.headers["Content-Length"])
         body = json.loads(self.rfile.read(length))
         type(self).requests.append({"path": self.path, "headers": dict(self.headers), "body": body})
-        status, response = type(self).responses.pop(0)
+        queued = type(self).responses.pop(0)
+        status, response = queued[:2]
+        extra_headers = queued[2] if len(queued) == 3 else {}
         raw = response if isinstance(response, bytes) else json.dumps(response).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
         request_number = len(type(self).requests)
-        self.send_header("X-Keel-Request-ID", f"request-{request_number}")
-        self.send_header("X-Keel-Permit-ID", f"permit-{request_number}")
+        default_headers = {
+            "X-Keel-Request-ID": f"01K4{request_number:022d}",
+            "X-Keel-Permit-ID": str(uuid.UUID(int=request_number)),
+        }
+        for name, value in {**default_headers, **extra_headers}.items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -106,17 +113,91 @@ class ProtocolDoubleTest(unittest.TestCase):
         records = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(
             [(item["request_id"], item["permit_id"]) for item in records],
-            [("request-1", "permit-1"), ("request-2", "permit-2")],
+            [
+                ("01K40000000000000000000001", "00000000-0000-0000-0000-000000000001"),
+                ("01K40000000000000000000002", "00000000-0000-0000-0000-000000000002"),
+            ],
         )
 
     def test_missing_or_oversized_correlation_headers_do_not_become_evidence(self):
-        self.assertIsNone(verify_execute._bounded_header(None, "X-Keel-Request-ID"))
         self.assertIsNone(
-            verify_execute._bounded_header(
-                {"X-Keel-Request-ID": "x" * 257},
-                "X-Keel-Request-ID",
+            verify_execute._correlation_header(
+                None,
+                field="request_id",
+                name="X-Keel-Request-ID",
             )
         )
+        self.assertIsNone(
+            verify_execute._correlation_header(
+                {"X-Keel-Request-ID": "x" * 257},
+                field="request_id",
+                name="X-Keel-Request-ID",
+            )
+        )
+
+    def test_split_secret_in_correlation_headers_is_not_printed(self):
+        sentinel = "ks_live_abcdefghijklmnop"
+        first, second = sentinel[:12], sentinel[12:]
+        allow = {"status": "completed", "governance": {"decision": "allow"}}
+        deny = {
+            "status": "denied",
+            "governance": {"decision": "deny"},
+            "error": {"stage": "permit", "code": "policy.rule_denied"},
+        }
+        injected = {
+            "X-Keel-Request-ID": first,
+            "X-Keel-Permit-ID": second,
+        }
+        with server([(200, allow, injected), (403, deny, injected)]) as base_url:
+            out, err = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"KEEL_API_KEY": sentinel}, clear=False),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+            ):
+                code = verify_execute.main(
+                    [
+                        "--provider",
+                        "test",
+                        "--allow-model",
+                        "small",
+                        "--deny-model",
+                        "large",
+                        "--base-url",
+                        base_url,
+                    ]
+                )
+        emitted = out.getvalue() + err.getvalue()
+        self.assertEqual(code, 0)
+        self.assertNotIn(first, emitted)
+        self.assertNotIn(second, emitted)
+        self.assertNotIn(sentinel, emitted)
+
+    def test_response_body_over_the_fixed_limit_is_refused_without_printing_it(self):
+        marker = "response-content-must-not-print"
+        raw = (marker + "x" * verify_execute.MAX_RESPONSE_BYTES).encode()
+        with server([(502, raw)]) as base_url:
+            result = verify_execute.execute_attempt(
+                base_url=base_url,
+                key="redacted-test-value",
+                provider="test",
+                model="model",
+                expectation="allow",
+            )
+        self.assertEqual(result["classification"], "malformed_response")
+        self.assertNotIn(marker, json.dumps(result))
+
+    def test_response_scalars_are_closed_or_bounded_protocol_values(self):
+        body = {
+            "status": "credential fragment",
+            "governance": {"decision": "credential fragment"},
+            "error": {"stage": "credential fragment", "code": "UPPERCASE secret"},
+        }
+        result = verify_execute.classify(500, body)
+        self.assertIsNone(result["body_status"])
+        self.assertIsNone(result["governance_decision"])
+        self.assertIsNone(result["error_stage"])
+        self.assertIsNone(result["error_code"])
 
     def test_provider_refusal_at_401_and_403_is_not_denial(self):
         for status in (401, 403):

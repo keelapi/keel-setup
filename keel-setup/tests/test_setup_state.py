@@ -24,7 +24,7 @@ def _valid(**overrides):
         "stage": "integration_ready",
         "provider": "openai",
         "allowed_model": "gpt-4o-mini",
-        "denied_model": "gpt-4o",
+        "denied_model": "o4-mini",
         "updated_at": "2026-08-28T10:00:00Z",
     }
     state.update(overrides)
@@ -64,7 +64,14 @@ class RefusalTest(unittest.TestCase):
         self.assertTrue(any("credential assignment" in item for item in failures), failures)
 
     def test_known_credential_prefix_is_refused(self):
-        for value in ("ks_live_abcdefgh", "sk-abcdefghijkl", "ghp_abcdefghijkl"):
+        for value in (
+            "ks_live_abcdefgh",
+            "sk-abcdefghijkl",
+            "ghp_abcdefghijkl",
+            " ks_live_abcdefgh",
+            "credential value ks_live_abcdefgh",
+            "config/ks_live_abcdefgh",
+        ):
             with self.subTest(value=value):
                 failures = setup_state.refusals(_valid(pinned_skill_ref=value))
                 self.assertTrue(any("credential prefix" in item for item in failures), failures)

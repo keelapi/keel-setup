@@ -9,12 +9,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any
 
 DEFAULT_BASE_URL = "https://api.keelapi.com"
@@ -35,6 +37,13 @@ CORRELATION_HEADERS = {
     "request_id": "X-Keel-Request-ID",
     "permit_id": "X-Keel-Permit-ID",
 }
+
+MAX_RESPONSE_BYTES = 64 * 1024
+_ULID_PATTERN = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}", re.IGNORECASE)
+_SAFE_ERROR_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_.-]{0,127}")
+_BODY_STATUSES = frozenset({"completed", "denied", "failed"})
+_GOVERNANCE_DECISIONS = frozenset({"allow", "deny"})
+_ERROR_STAGES = frozenset({"permit", "dispatch"})
 
 
 def _nonempty(value: str) -> str:
@@ -91,10 +100,10 @@ def classify(http_status: int | None, body: dict[str, Any] | None) -> dict[str, 
     body = body or {}
     governance = body.get("governance") if isinstance(body.get("governance"), dict) else {}
     error = body.get("error") if isinstance(body.get("error"), dict) else {}
-    status = body.get("status") if isinstance(body.get("status"), str) else None
-    decision = governance.get("decision") if isinstance(governance.get("decision"), str) else None
-    stage = error.get("stage") if isinstance(error.get("stage"), str) else None
-    code = error.get("code") if isinstance(error.get("code"), str) else None
+    status = _allowlisted_scalar(body.get("status"), _BODY_STATUSES)
+    decision = _allowlisted_scalar(governance.get("decision"), _GOVERNANCE_DECISIONS)
+    stage = _allowlisted_scalar(error.get("stage"), _ERROR_STAGES)
+    code = _safe_error_code(error.get("code"))
 
     if http_status == 200 and status == "completed" and decision == "allow":
         result = "allowed_completed"
@@ -122,6 +131,22 @@ def classify(http_status: int | None, body: dict[str, Any] | None) -> dict[str, 
         "error_code": code,
         "classification": result,
     }
+
+
+def _allowlisted_scalar(value: Any, allowed: frozenset[str]) -> str | None:
+    """Return only a response scalar from a closed protocol vocabulary."""
+
+    if not isinstance(value, str) or value not in allowed:
+        return None
+    return value
+
+
+def _safe_error_code(value: Any) -> str | None:
+    """Return one bounded protocol error code, never arbitrary response text."""
+
+    if not isinstance(value, str) or _SAFE_ERROR_CODE_PATTERN.fullmatch(value) is None:
+        return None
+    return value
 
 
 def execute_attempt(
@@ -156,11 +181,11 @@ def execute_attempt(
         with _open(request, timeout=timeout) as response:
             http_status = response.status
             response_headers = response.headers
-            raw = response.read()
+            raw = _read_bounded(response)
     except urllib.error.HTTPError as exc:
         http_status = exc.code
         response_headers = exc.headers
-        raw = exc.read()
+        raw = _read_bounded(exc)
     except (urllib.error.URLError, TimeoutError, OSError):
         http_status = None
         raw = b""
@@ -175,15 +200,24 @@ def execute_attempt(
             body = None
     result = classify(http_status, body)
     correlation = {
-        field: _bounded_header(response_headers, header)
+        field: _correlation_header(response_headers, field=field, name=header)
         for field, header in CORRELATION_HEADERS.items()
     }
     result.update({"model": model, "expectation": expectation, **correlation})
     return {field: result.get(field) for field in OUTPUT_FIELDS}
 
 
-def _bounded_header(headers: Any, name: str) -> str | None:
-    """Return one non-secret correlation header without trusting arbitrary size."""
+def _read_bounded(response: Any) -> bytes:
+    """Read one response body up to the verification helper's fixed ceiling."""
+
+    raw = response.read(MAX_RESPONSE_BYTES + 1)
+    if len(raw) > MAX_RESPONSE_BYTES:
+        return b""
+    return raw
+
+
+def _correlation_header(headers: Any, *, field: str, name: str) -> str | None:
+    """Return only a correlation value in the format emitted by ``/v1/execute``."""
 
     if headers is None or not hasattr(headers, "get"):
         return None
@@ -191,9 +225,16 @@ def _bounded_header(headers: Any, name: str) -> str | None:
     if not isinstance(value, str):
         return None
     value = value.strip()
-    if not value or len(value) > 256:
+    if field == "request_id":
+        return value if _ULID_PATTERN.fullmatch(value) is not None else None
+    if field != "permit_id":
         return None
-    return value
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError:
+        return None
+    canonical = str(parsed)
+    return canonical if value.lower() == canonical else None
 
 
 def redact_record(record: dict[str, Any], secret: str) -> dict[str, Any]:

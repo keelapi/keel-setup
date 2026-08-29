@@ -8,6 +8,6 @@
   "included_files": [
     "tools/public_surface.json"
   ],
-  "source_commit": "96eaf2aef2ba3b27a82d7689be83ca21b2b2e49e",
+  "source_commit": "e03a89e29e2a1ddf06d897858e9b24be7ad0f61d",
   "source_repository": "keelapi/keel-skills"
 }
