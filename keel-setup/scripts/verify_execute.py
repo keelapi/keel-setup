@@ -21,6 +21,8 @@ DEFAULT_BASE_URL = "https://api.keelapi.com"
 OUTPUT_FIELDS = (
     "model",
     "expectation",
+    "request_id",
+    "permit_id",
     "http_status",
     "body_status",
     "governance_decision",
@@ -28,6 +30,11 @@ OUTPUT_FIELDS = (
     "error_code",
     "classification",
 )
+
+CORRELATION_HEADERS = {
+    "request_id": "X-Keel-Request-ID",
+    "permit_id": "X-Keel-Permit-ID",
+}
 
 
 def _nonempty(value: str) -> str:
@@ -127,7 +134,6 @@ def execute_attempt(
         {
             "provider": provider,
             "model": model,
-            "operation": "generate.text",
             "input": {"messages": [{"role": "user", "content": "Reply with OK."}]},
         },
         separators=(",", ":"),
@@ -145,12 +151,15 @@ def execute_attempt(
     )
     http_status: int | None
     raw: bytes
+    response_headers: Any = None
     try:
         with _open(request, timeout=timeout) as response:
             http_status = response.status
+            response_headers = response.headers
             raw = response.read()
     except urllib.error.HTTPError as exc:
         http_status = exc.code
+        response_headers = exc.headers
         raw = exc.read()
     except (urllib.error.URLError, TimeoutError, OSError):
         http_status = None
@@ -165,8 +174,26 @@ def execute_attempt(
         except (UnicodeDecodeError, json.JSONDecodeError):
             body = None
     result = classify(http_status, body)
-    result.update({"model": model, "expectation": expectation})
+    correlation = {
+        field: _bounded_header(response_headers, header)
+        for field, header in CORRELATION_HEADERS.items()
+    }
+    result.update({"model": model, "expectation": expectation, **correlation})
     return {field: result.get(field) for field in OUTPUT_FIELDS}
+
+
+def _bounded_header(headers: Any, name: str) -> str | None:
+    """Return one non-secret correlation header without trusting arbitrary size."""
+
+    if headers is None or not hasattr(headers, "get"):
+        return None
+    value = headers.get(name)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or len(value) > 256:
+        return None
+    return value
 
 
 def redact_record(record: dict[str, Any], secret: str) -> dict[str, Any]:

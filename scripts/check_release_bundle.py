@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = "9204f54688d3a3c6e84a3cb7c6c54c3aafd35a09"
+SOURCE_COMMIT = "96eaf2aef2ba3b27a82d7689be83ca21b2b2e49e"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -32,13 +32,16 @@ EXPECTED_FILES = {
     "keel-setup/SKILL.md",
     "keel-setup/reference/coverage.schema.json",
     "keel-setup/reference/setup-state.schema.json",
+    "keel-setup/reference/unified-execute-request.contract.json",
     "keel-setup/scripts/inventory.py",
     "keel-setup/scripts/setup_state.py",
     "keel-setup/scripts/verify_execute.py",
     "keel-setup/tests/test_inventory.py",
+    "keel-setup/tests/test_execute_request_contract.py",
     "keel-setup/tests/test_setup_state.py",
     "keel-setup/tests/test_verify_execute.py",
     "scripts/check_release_bundle.py",
+    "scripts/check_execute_contract.py",
     "shared/CONSTITUTION.md",
     "shared/feedback-report.schema.json",
     "shared/feedback-report.template.md",

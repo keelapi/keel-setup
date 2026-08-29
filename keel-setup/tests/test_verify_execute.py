@@ -35,6 +35,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
+        request_number = len(type(self).requests)
+        self.send_header("X-Keel-Request-ID", f"request-{request_number}")
+        self.send_header("X-Keel-Permit-ID", f"permit-{request_number}")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -96,6 +99,24 @@ class ProtocolDoubleTest(unittest.TestCase):
         self.assertTrue(all(len(item) >= 16 for item in nonces))
         self.assertTrue(all(item["headers"]["X-Keel-Timestamp"].isdigit() for item in _Handler.requests))
         self.assertTrue(all("messages" in item["body"]["input"] and "text" not in item["body"]["input"] for item in _Handler.requests))
+        self.assertTrue(
+            all(set(item["body"]) == {"provider", "model", "input"} for item in _Handler.requests)
+        )
+        self.assertTrue(all("operation" not in item["body"] for item in _Handler.requests))
+        records = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(
+            [(item["request_id"], item["permit_id"]) for item in records],
+            [("request-1", "permit-1"), ("request-2", "permit-2")],
+        )
+
+    def test_missing_or_oversized_correlation_headers_do_not_become_evidence(self):
+        self.assertIsNone(verify_execute._bounded_header(None, "X-Keel-Request-ID"))
+        self.assertIsNone(
+            verify_execute._bounded_header(
+                {"X-Keel-Request-ID": "x" * 257},
+                "X-Keel-Request-ID",
+            )
+        )
 
     def test_provider_refusal_at_401_and_403_is_not_denial(self):
         for status in (401, 403):

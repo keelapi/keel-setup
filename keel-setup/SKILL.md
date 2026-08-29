@@ -59,8 +59,9 @@ python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-stat
 
 The helper validates the file against `reference/setup-state.schema.json`, refuses a file carrying a
 bearer value, a credential assignment, a known credential prefix, an over-long string, or a
-mapping-authority field, and reports what the return loop is due to do. Exit `1` means the state was
-refused or the path is not ignored by git.
+mapping-authority field, increments once, and atomically persists the validated next state only after
+git confirms the exact path is ignored. It reports what the return loop is due to do. Exit `1` means
+the state was refused, the ignore status could not be established, or the atomic write failed.
 
 If the file is missing, invalid, or refused, say that continuity was lost, start at invocation 1, and
 do not infer prior success from it. The count is local workflow state, not Keel evidence: it records
@@ -160,6 +161,10 @@ Run:
 ```text
 python3 keel-setup/scripts/verify_execute.py --provider PROVIDER --allow-model ALLOWED --deny-model DENIED
 ```
+
+Retain the script's non-secret `request_id` and `permit_id` values for exact dashboard and Permit
+matching. If either is null, report that exact correlation is unavailable; never infer it from a
+nearby model name or timestamp.
 
 The helper reads the key only from its environment. It generates an integer timestamp and a distinct
 nonce inside each request attempt, sends `input.messages`, and prints only bounded classification
