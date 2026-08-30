@@ -8,7 +8,6 @@ import ast
 import hashlib
 import json
 import pathlib
-import re
 from typing import Any
 
 
@@ -17,6 +16,9 @@ CONTRACT = ROOT / "keel-setup/reference/unified-execute-request.contract.json"
 HELPER = ROOT / "keel-setup/scripts/verify_execute.py"
 EXPECTED_CONTRACT_VERSION = "keel.public_unified_execute_request_contract.v1"
 EXPECTED_API_REPOSITORY = "keelapi/keel-api"
+EXPECTED_API_SOURCE_COMMIT = "4ce5f5def6258004861dfaeeef512e49afc87cfd"
+EXPECTED_API_MERGE_COMMIT = "c130f73d966fce6572aa5dc8ff48164b9e9dbf15"
+EXPECTED_API_OPENAPI_SHA256 = "40f9b7ef1ad7ab38409c6b97d36ec654afc94a40f98475b6cda06b331b355db9"
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -80,8 +82,13 @@ def validate(
     if contract.get("source_repository") != EXPECTED_API_REPOSITORY:
         raise ValueError("unified-execute contract must name keelapi/keel-api")
     source_commit = contract.get("source_commit")
-    if not isinstance(source_commit, str) or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
-        raise ValueError("unified-execute contract must pin a 40-character API commit")
+    if source_commit != EXPECTED_API_SOURCE_COMMIT:
+        raise ValueError("unified-execute contract does not pin the reviewed API source commit")
+    source_merge_commit = contract.get("source_merge_commit")
+    if source_merge_commit != EXPECTED_API_MERGE_COMMIT:
+        raise ValueError("unified-execute contract does not pin the merged API commit")
+    if contract.get("source_artifact_sha256") != EXPECTED_API_OPENAPI_SHA256:
+        raise ValueError("unified-execute contract does not pin the merged OpenAPI digest")
 
     schema = contract.get("schema")
     if not isinstance(schema, dict):

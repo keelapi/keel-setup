@@ -62,6 +62,22 @@ class ExecuteRequestContractTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "OpenAPI digest differs"):
                 check_execute_contract.validate(openapi_path=artifact)
 
+    def test_source_and_merge_provenance_are_exact_pins(self):
+        contract = json.loads(check_execute_contract.CONTRACT.read_text(encoding="utf-8"))
+        mutations = (
+            ("source_commit", "0" * 40, "reviewed API source commit"),
+            ("source_merge_commit", "1" * 40, "merged API commit"),
+            ("source_artifact_sha256", "2" * 64, "merged OpenAPI digest"),
+        )
+        for field, value, message in mutations:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                mutated = dict(contract)
+                mutated[field] = value
+                path = pathlib.Path(directory) / "contract.json"
+                path.write_text(json.dumps(mutated), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, message):
+                    check_execute_contract.validate(contract_path=path)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

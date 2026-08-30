@@ -65,7 +65,8 @@
   },
   "schema_sha256": "67beb5283aa68267eeaaa52bfcc4e7d799fe61d5e9f194445e8230de44478213",
   "source_artifact": "docs/public-artifacts/openapi.json",
-  "source_artifact_sha256": "01e5756b1d47610f7760e673265b64a7256f9cfef343942d8c49a7050eba22c8",
-  "source_commit": "09a1971147ee091404175edf7f206e4488afded6",
+  "source_artifact_sha256": "40f9b7ef1ad7ab38409c6b97d36ec654afc94a40f98475b6cda06b331b355db9",
+  "source_commit": "4ce5f5def6258004861dfaeeef512e49afc87cfd",
+  "source_merge_commit": "c130f73d966fce6572aa5dc8ff48164b9e9dbf15",
   "source_repository": "keelapi/keel-api"
 }

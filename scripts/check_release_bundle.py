@@ -11,7 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = "e03a89e29e2a1ddf06d897858e9b24be7ad0f61d"
+SOURCE_COMMIT = "ef6b92880f0729c336b3fad85e256135c91968da"
+SOURCE_MERGE_COMMIT = "165c5f308bb339d8024f9fb1d66956e0940db2e7"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -119,6 +120,8 @@ def main() -> int:
     source = json.loads((ROOT / "SOURCE.json").read_text(encoding="utf-8"))
     if source.get("source_commit") != SOURCE_COMMIT:
         raise ValueError("SOURCE.json does not pin the reviewed source commit")
+    if source.get("source_merge_commit") != SOURCE_MERGE_COMMIT:
+        raise ValueError("SOURCE.json does not pin the merged source commit")
     if source.get("included_roots") != ["keel-policy", "keel-setup", "shared"]:
         raise ValueError("SOURCE.json included_roots changed")
     if source.get("included_files") != ["tools/public_surface.json"]:
