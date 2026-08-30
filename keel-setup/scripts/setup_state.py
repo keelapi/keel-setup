@@ -12,11 +12,14 @@ Exit 0 = the state is usable. Exit 1 = the state was refused or invalid.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -59,7 +62,9 @@ CREDENTIAL_SHAPES = (
         "carries a credential assignment",
     ),
     (
-        re.compile(r"^(?:ks_|sk-|sk_|pk_|rk_|ghp_|gho_|xox[baprs]-)[A-Za-z0-9_\-]{8,}"),
+        re.compile(
+            r"(?<![A-Za-z0-9_])(?:ks_|sk-|sk_|pk_|rk_|ghp_|gho_|xox[baprs]-)[A-Za-z0-9_\-]{8,}"
+        ),
         "matches a known credential prefix",
     ),
 )
@@ -165,12 +170,16 @@ def due_reviews(
     return due
 
 
-def initial_state() -> dict[str, Any]:
+def _utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def initial_state(*, updated_at: str | None = None) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "invocation_count": 1,
         "stage": "discovery",
-        "updated_at": None,
+        "updated_at": updated_at or _utc_now(),
     }
 
 
@@ -193,34 +202,70 @@ def is_git_ignored(repo_root: pathlib.Path, relative: pathlib.PurePosixPath) -> 
     return None
 
 
-def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
-    """Read the state once, increment the count once, and report what is due."""
+def write_state_atomically(state_path: pathlib.Path, state: dict[str, Any]) -> None:
+    """Persist validated continuity without ever exposing a partial JSON file."""
 
+    failures = validate_state(state)
+    if failures:
+        raise ValueError("refusing to persist invalid local setup state: " + "; ".join(failures))
+
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: pathlib.Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_path.parent,
+            prefix=f".{state_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = pathlib.Path(handle.name)
+            os.chmod(temporary_path, 0o600)
+            json.dump(state, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, state_path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
+    """Read, advance, and atomically persist one local invocation."""
+
+    now = _utc_now()
     continuity = "resumed"
     continuity_reason: str | None = None
     problems: list[str] = []
     try:
         raw = state_path.read_text(encoding="utf-8")
     except OSError:
-        state = initial_state()
+        state = initial_state(updated_at=now)
         continuity = "lost"
         continuity_reason = "no local state file was readable at this path"
     else:
         try:
             loaded = json.loads(raw)
         except json.JSONDecodeError as exc:
-            state = initial_state()
+            state = initial_state(updated_at=now)
             continuity = "lost"
             continuity_reason = f"local state file is not valid JSON: {exc}"
         else:
             problems = validate_state(loaded)
             if problems:
-                state = initial_state()
+                state = initial_state(updated_at=now)
                 continuity = "lost"
                 continuity_reason = "local state file was refused; see refusals"
             else:
                 state = dict(loaded)
                 state["invocation_count"] = int(state["invocation_count"]) + 1
+                state["updated_at"] = now
 
     stage = state.get("stage")
     relative = state_path
@@ -229,6 +274,20 @@ def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
     except (OSError, ValueError):
         relative = state_path
     ignored = is_git_ignored(repo_root, pathlib.PurePosixPath(pathlib.PurePath(relative).as_posix()))
+
+    state_persisted = False
+    persistence_error: str | None = None
+    if ignored is True:
+        try:
+            write_state_atomically(state_path, state)
+        except (OSError, ValueError) as exc:
+            persistence_error = f"local state was not persisted: {exc}"
+        else:
+            state_persisted = True
+    elif ignored is False:
+        persistence_error = "local state path is not ignored by git"
+    else:
+        persistence_error = "could not establish that the local state path is ignored by git"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -244,6 +303,8 @@ def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
             state.get("last_maintenance_review_invocation"),
         ),
         "state_path_git_ignored": ignored,
+        "state_persisted": state_persisted,
+        "persistence_error": persistence_error,
         "evidence_level": "unresolved",
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
@@ -286,6 +347,9 @@ def main(argv: list[str] | None = None) -> int:
             "local state path is not ignored by git; ignore it before writing continuity",
             file=sys.stderr,
         )
+        return 1
+    if not report["state_persisted"]:
+        print(report["persistence_error"] or "local state was not persisted", file=sys.stderr)
         return 1
     return 0
 

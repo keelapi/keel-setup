@@ -8,6 +8,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "setup_state.py"
 SPEC = importlib.util.spec_from_file_location("setup_state", SCRIPT)
@@ -23,7 +24,7 @@ def _valid(**overrides):
         "stage": "integration_ready",
         "provider": "openai",
         "allowed_model": "gpt-4o-mini",
-        "denied_model": "gpt-4o",
+        "denied_model": "o4-mini",
         "updated_at": "2026-08-28T10:00:00Z",
     }
     state.update(overrides)
@@ -63,7 +64,14 @@ class RefusalTest(unittest.TestCase):
         self.assertTrue(any("credential assignment" in item for item in failures), failures)
 
     def test_known_credential_prefix_is_refused(self):
-        for value in ("ks_live_abcdefgh", "sk-abcdefghijkl", "ghp_abcdefghijkl"):
+        for value in (
+            "ks_live_abcdefgh",
+            "sk-abcdefghijkl",
+            "ghp_abcdefghijkl",
+            " ks_live_abcdefgh",
+            "credential value ks_live_abcdefgh",
+            "config/ks_live_abcdefgh",
+        ):
             with self.subTest(value=value):
                 failures = setup_state.refusals(_valid(pinned_skill_ref=value))
                 self.assertTrue(any("credential prefix" in item for item in failures), failures)
@@ -139,10 +147,14 @@ class BeginTest(unittest.TestCase):
     def test_missing_file_reports_lost_continuity_and_starts_at_one(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._repo(directory)
-            report = setup_state.begin(root / ".keel" / "setup-state.json", root)
+            path = root / ".keel" / "setup-state.json"
+            report = setup_state.begin(path, root)
+            stored = json.loads(path.read_text())
         self.assertEqual(report["continuity"], "lost")
         self.assertEqual(report["invocation_count"], 1)
         self.assertEqual(report["due"], [])
+        self.assertTrue(report["state_persisted"])
+        self.assertEqual(stored["invocation_count"], 1)
         self.assertIn("prior_run_success", report["does_not_establish"])
         self.assertEqual(report["evidence_level"], "unresolved")
 
@@ -152,9 +164,13 @@ class BeginTest(unittest.TestCase):
             path = root / ".keel" / "setup-state.json"
             path.write_text("{not json")
             report = setup_state.begin(path, root)
+            stored = json.loads(path.read_text())
         self.assertEqual(report["continuity"], "lost")
         self.assertEqual(report["invocation_count"], 1)
         self.assertEqual(report["stage"], "discovery")
+        self.assertEqual(setup_state.validate_state(stored), [])
+        self.assertEqual(stored["invocation_count"], 1)
+        self.assertEqual(stored["stage"], "discovery")
 
     def test_refused_file_reports_lost_continuity_and_the_reasons(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -162,9 +178,13 @@ class BeginTest(unittest.TestCase):
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid(pinned_skill_ref="Bearer ks_live_abcdefgh")))
             report = setup_state.begin(path, root)
+            stored = json.loads(path.read_text())
         self.assertEqual(report["continuity"], "lost")
         self.assertEqual(report["invocation_count"], 1)
         self.assertTrue(report["refusals"])
+        self.assertEqual(setup_state.validate_state(stored), [])
+        self.assertEqual(stored["invocation_count"], 1)
+        self.assertEqual(stored["stage"], "discovery")
 
     def test_valid_file_increments_exactly_once(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -173,11 +193,23 @@ class BeginTest(unittest.TestCase):
             path.write_text(json.dumps(_valid(invocation_count=4, stage="state_d_verified")))
             report = setup_state.begin(path, root)
             again = setup_state.begin(path, root)
+            stored = json.loads(path.read_text())
         self.assertEqual(report["continuity"], "resumed")
         self.assertEqual(report["invocation_count"], 5)
         self.assertIn("drift_audit", report["due"])
-        # begin() never writes, so the count advances only when the caller stores it.
-        self.assertEqual(again["invocation_count"], 5)
+        self.assertEqual(again["invocation_count"], 6)
+        self.assertEqual(stored["invocation_count"], 6)
+
+    def test_persisted_state_is_private_and_leaves_no_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            path = root / ".keel" / "setup-state.json"
+            report = setup_state.begin(path, root)
+            mode = path.stat().st_mode & 0o777
+            temporary_files = list(path.parent.glob(f".{path.name}.*.tmp"))
+        self.assertTrue(report["state_persisted"])
+        self.assertEqual(mode, 0o600)
+        self.assertEqual(temporary_files, [])
 
     def test_state_f_stage_is_reported_unsupported_on_this_revision(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -195,10 +227,31 @@ class BeginTest(unittest.TestCase):
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             report = setup_state.begin(path, root)
+            stored = json.loads(path.read_text())
         self.assertFalse(report["state_path_git_ignored"])
+        self.assertFalse(report["state_persisted"])
+        self.assertEqual(stored["invocation_count"], 3)
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_main_persists_each_successful_invocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / ".keel").mkdir()
+            (root / ".gitignore").write_text(".keel/\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            path = root / ".keel" / "setup-state.json"
+            reports = []
+            for _ in range(2):
+                with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    code = setup_state.main(["--state", str(path), "--repo-root", str(root)])
+                self.assertEqual(code, 0)
+                reports.append(json.loads(stdout.getvalue()))
+            stored = json.loads(path.read_text())
+        self.assertEqual([item["invocation_count"] for item in reports], [1, 2])
+        self.assertTrue(all(item["state_persisted"] for item in reports))
+        self.assertEqual(stored["invocation_count"], 2)
+
     def test_unignored_state_path_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -209,6 +262,26 @@ class CommandLineTest(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 code = setup_state.main(["--state", str(path), "--repo-root", str(root)])
         self.assertEqual(code, 1)
+
+    def test_write_failure_exits_nonzero_without_claiming_persistence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / ".keel").mkdir()
+            (root / ".gitignore").write_text(".keel/\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            path = root / ".keel" / "setup-state.json"
+            with (
+                mock.patch.object(
+                    setup_state,
+                    "write_state_atomically",
+                    side_effect=OSError("simulated write failure"),
+                ),
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                code = setup_state.main(["--state", str(path), "--repo-root", str(root)])
+        self.assertEqual(code, 1)
+        self.assertFalse(json.loads(stdout.getvalue())["state_persisted"])
 
     def test_validate_only_rejects_a_refused_file(self):
         with tempfile.TemporaryDirectory() as directory:

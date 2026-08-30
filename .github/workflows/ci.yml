@@ -18,6 +18,8 @@ jobs:
           python-version: "3.12"
       - name: Verify release allowlist and hashes
         run: python scripts/check_release_bundle.py
+      - name: Verify unified execute request contract
+        run: python scripts/check_execute_contract.py
       - name: Run setup tests
         run: python -m unittest discover -s keel-setup/tests -p 'test_*.py'
       - name: Run policy tests

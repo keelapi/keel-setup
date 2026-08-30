@@ -1,0 +1,72 @@
+{
+  "contract_schema_version": "keel.public_unified_execute_request_contract.v1",
+  "helper_request_keys": [
+    "input",
+    "model",
+    "provider"
+  ],
+  "schema": {
+    "additionalProperties": false,
+    "properties": {
+      "action_verb": {
+        "default": "ai.generate",
+        "description": "Action verb this request executes. Defaults to ai.generate for backward compatibility.",
+        "enum": [
+          "ai.generate",
+          "payment.execute"
+        ],
+        "title": "Action Verb",
+        "type": "string"
+      },
+      "budget_envelope_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Optional Keel budget envelope bound to this execution. When set, the execution permit reserves against the envelope before dispatch.",
+        "title": "Budget Envelope Id"
+      },
+      "input": {
+        "additionalProperties": true,
+        "title": "Input",
+        "type": "object"
+      },
+      "model": {
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Model",
+        "type": "string"
+      },
+      "provider": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Provider"
+      }
+    },
+    "required": [
+      "model",
+      "input"
+    ],
+    "title": "UnifiedExecuteRequest",
+    "type": "object"
+  },
+  "schema_sha256": "67beb5283aa68267eeaaa52bfcc4e7d799fe61d5e9f194445e8230de44478213",
+  "source_artifact": "docs/public-artifacts/openapi.json",
+  "source_artifact_sha256": "40f9b7ef1ad7ab38409c6b97d36ec654afc94a40f98475b6cda06b331b355db9",
+  "source_commit": "4ce5f5def6258004861dfaeeef512e49afc87cfd",
+  "source_merge_commit": "c130f73d966fce6572aa5dc8ff48164b9e9dbf15",
+  "source_repository": "keelapi/keel-api"
+}

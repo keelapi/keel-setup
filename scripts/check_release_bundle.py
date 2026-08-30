@@ -11,7 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = "9204f54688d3a3c6e84a3cb7c6c54c3aafd35a09"
+SOURCE_COMMIT = "ef6b92880f0729c336b3fad85e256135c91968da"
+SOURCE_MERGE_COMMIT = "165c5f308bb339d8024f9fb1d66956e0940db2e7"
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -32,13 +33,16 @@ EXPECTED_FILES = {
     "keel-setup/SKILL.md",
     "keel-setup/reference/coverage.schema.json",
     "keel-setup/reference/setup-state.schema.json",
+    "keel-setup/reference/unified-execute-request.contract.json",
     "keel-setup/scripts/inventory.py",
     "keel-setup/scripts/setup_state.py",
     "keel-setup/scripts/verify_execute.py",
     "keel-setup/tests/test_inventory.py",
+    "keel-setup/tests/test_execute_request_contract.py",
     "keel-setup/tests/test_setup_state.py",
     "keel-setup/tests/test_verify_execute.py",
     "scripts/check_release_bundle.py",
+    "scripts/check_execute_contract.py",
     "shared/CONSTITUTION.md",
     "shared/feedback-report.schema.json",
     "shared/feedback-report.template.md",
@@ -116,6 +120,8 @@ def main() -> int:
     source = json.loads((ROOT / "SOURCE.json").read_text(encoding="utf-8"))
     if source.get("source_commit") != SOURCE_COMMIT:
         raise ValueError("SOURCE.json does not pin the reviewed source commit")
+    if source.get("source_merge_commit") != SOURCE_MERGE_COMMIT:
+        raise ValueError("SOURCE.json does not pin the merged source commit")
     if source.get("included_roots") != ["keel-policy", "keel-setup", "shared"]:
         raise ValueError("SOURCE.json included_roots changed")
     if source.get("included_files") != ["tools/public_surface.json"]:
