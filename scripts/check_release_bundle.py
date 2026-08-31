@@ -11,8 +11,17 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_COMMIT = "ef6b92880f0729c336b3fad85e256135c91968da"
-SOURCE_MERGE_COMMIT = "165c5f308bb339d8024f9fb1d66956e0940db2e7"
+PUBLIC_RELEASE_VERSION = "2026-08-30.1"
+PRODUCT_SOURCE_SHA256 = "271d9e95db11a9bdb677e45415520d87c6a2749841b3820977448b860e448482"
+PUBLICATION_LAYER_FILES = [
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    "README.md",
+    "SHA256SUMS",
+    "SOURCE.json",
+    "scripts/check_execute_contract.py",
+    "scripts/check_release_bundle.py",
+]
 EXPECTED_FILES = {
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -73,6 +82,16 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _product_source_sha256(exemptions: set[str]) -> str:
+    digest = hashlib.sha256()
+    paths = sorted(EXPECTED_FILES - exemptions)
+    for relative in paths:
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256((ROOT / relative).read_bytes()).digest())
+    return digest.hexdigest()
+
+
 def _check_manifest() -> None:
     lines = (ROOT / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
     paths: list[str] = []
@@ -117,15 +136,40 @@ def main() -> int:
         extra = sorted(actual - EXPECTED_FILES)
         raise ValueError(f"release allowlist mismatch: missing={missing}, extra={extra}")
 
-    source = json.loads((ROOT / "SOURCE.json").read_text(encoding="utf-8"))
-    if source.get("source_commit") != SOURCE_COMMIT:
-        raise ValueError("SOURCE.json does not pin the reviewed source commit")
-    if source.get("source_merge_commit") != SOURCE_MERGE_COMMIT:
-        raise ValueError("SOURCE.json does not pin the merged source commit")
+    source_raw = (ROOT / "SOURCE.json").read_text(encoding="utf-8")
+    source = json.loads(source_raw)
+    if source.get("public_release_version") != PUBLIC_RELEASE_VERSION:
+        raise ValueError("SOURCE.json does not identify the reviewed public release version")
+    if source.get("product_source_sha256") != PRODUCT_SOURCE_SHA256:
+        raise ValueError("SOURCE.json does not pin the reviewed public product digest")
+    if {"source_repository", "source_commit", "source_merge_commit"} & set(source):
+        raise ValueError("SOURCE.json exposes private source provenance")
+    private_source_name = "keel-" + "skills"
+    if private_source_name in source_raw:
+        raise ValueError("SOURCE.json names the private source repository")
     if source.get("included_roots") != ["keel-policy", "keel-setup", "shared"]:
         raise ValueError("SOURCE.json included_roots changed")
     if source.get("included_files") != ["tools/public_surface.json"]:
         raise ValueError("SOURCE.json included_files changed")
+    if source.get("publication_layer_files") != PUBLICATION_LAYER_FILES:
+        raise ValueError("SOURCE.json publication-layer exemption changed")
+    computed_product_digest = _product_source_sha256(set(PUBLICATION_LAYER_FILES))
+    if computed_product_digest != PRODUCT_SOURCE_SHA256:
+        raise ValueError("public product files differ from the immutable SOURCE.json commitment")
+
+    manifest_raw = (ROOT / "tools/public_surface.json").read_text(encoding="utf-8")
+    manifest = json.loads(manifest_raw)
+    if set(manifest) != {"_comment", "actions", "requirements", "fields", "field_adjudications"}:
+        raise ValueError("public surface manifest is not the positive allowlist shape")
+    for section in ("actions", "requirements", "fields"):
+        if set(manifest.get(section, {})) != {"PUBLIC"}:
+            raise ValueError(f"public surface {section} exposes non-public buckets")
+    if private_source_name in manifest_raw:
+        raise ValueError("public surface manifest names the private source repository")
+
+    fields_raw = (ROOT / "keel-policy/reference/fields.md").read_text(encoding="utf-8")
+    if "keel-" + "api" in fields_raw or "app/" + "services/" in fields_raw:
+        raise ValueError("fields.md exposes a private repository or source path")
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for marker in ("# Keel setup", "[`keel-setup`](keel-setup/SKILL.md)", "[`keel-policy`](keel-policy/SKILL.md)"):

@@ -1,6 +1,5 @@
 {
-  "_comment": "Classification of every symbol the public keel-skills artifacts may emit. UNCLASSIFIED is a failure, not a default.",
-  "_measured": "2026-08-18 against keel-docs content/, docs/public-artifacts/openapi.json, and all 28 unauthenticated policy template documents.",
+  "_comment": "Positive allowlist of every symbol the reviewed public bundle may emit. Anything absent is refused.",
   "actions": {
     "PUBLIC": [
       "allow",
@@ -18,24 +17,13 @@
       "require_budget_envelope",
       "require_human_review",
       "throttle_if_rate_exceeds"
-    ],
-    "INTERNAL": [
-      "constrain_permit_subject",
-      "deny_if_action_class_not_in",
-      "require_identity_assurance",
-      "require_registered_key_counter_signature"
     ]
   },
   "requirements": {
     "PUBLIC": [
       "approval_requirement",
       "require_attestation"
-    ],
-    "PENDING": [
-      "require_co_signature",
-      "witness_requirement"
-    ],
-    "_note": "approval_requirement is public via docs/public-artifacts/openapi.json (10 occurrences); require_attestation is public via the unauthenticated policy templates (7 occurrences). Neither appears in keel-docs prose."
+    ]
   },
   "fields": {
     "PUBLIC": [
@@ -93,61 +81,108 @@
       "project_id",
       "provider",
       "token_estimate"
-    ],
-    "REMOVED": [
-      "context._keel.declared_intent",
-      "context._keel.payment_currency"
-    ],
-    "PENDING_action_envelope": [
-      "context._keel.action_envelope.mapping.assurance.value",
-      "context._keel.action_envelope.mapping.governance_action_id.value",
-      "context._keel.action_envelope.mapping.governance_action_version.value",
-      "context._keel.action_envelope.mapping.id.value",
-      "context._keel.action_envelope.mapping.revision.value"
-    ],
-    "PENDING_other": []
+    ]
   },
   "field_adjudications": {
-    "action.attributes.trusted_facts.environment": {"decision": "PUBLIC", "rationale": "Connector-asserted preflight environment is an authorable exact-match contract."},
-    "action.attributes.trusted_facts.max_uses": {"decision": "PUBLIC", "rationale": "Connector-asserted numeric use limit is an authorable preflight contract."},
-    "action.attributes.trusted_facts.tool_name": {"decision": "PUBLIC", "rationale": "Connector-asserted preflight tool name is required by the shipped refund policy pattern."},
-    "attrs.estimated_input_tokens": {"decision": "PUBLIC", "rationale": "Caller-asserted input-token estimate is explicitly authorable and labeled with its weaker provenance."},
-    "attrs.estimated_output_tokens": {"decision": "PUBLIC", "rationale": "Caller-asserted output-token estimate is explicitly authorable and labeled with its weaker provenance."},
-    "attrs.execution_mode": {"decision": "PUBLIC", "rationale": "Caller-asserted execution mode is a bounded authorable enum."},
-    "attrs.model": {"decision": "PUBLIC", "rationale": "Caller-asserted model attribute is an authorable request field distinct from Keel's derived top-level model."},
-    "attrs.provider": {"decision": "PUBLIC", "rationale": "Caller-asserted provider attribute is an authorable request field distinct from Keel's derived top-level provider."},
-    "context._keel.action_envelope.action.access_level.value": {"decision": "PUBLIC", "rationale": "Keel-derived access classification is authorable with explicit churn guidance in fields.md."},
-    "context._keel.action_envelope.action.risk_tags.value": {"decision": "PUBLIC", "rationale": "Keel-derived risk tags are authorable with explicit registry-churn guidance in fields.md."},
-    "context._keel.action_envelope.authority.compute_lineage_only.value": {"decision": "PUBLIC", "rationale": "Keel-derived agent.create_child lineage classification has a single documented boolean meaning."},
-    "context._keel.action_envelope.authority.is_mutation.state": {"decision": "PUBLIC", "rationale": "Availability state lets authors fail closed when authority mutation classification is unknown."},
-    "context._keel.action_envelope.authority.is_mutation.value": {"decision": "PUBLIC", "rationale": "Keel-derived authority-mutation value is published together with its availability state."},
-    "context._keel.action_envelope.connector.tool_schema_hash.state": {"decision": "PUBLIC", "rationale": "State-only contract lets authors require that a verified decision trace recorded a schema hash without claiming custody proof."},
-    "context._keel.action_envelope.financial.amount.state": {"decision": "PUBLIC", "rationale": "Availability state is required to distinguish a real zero from an unavailable rail-native amount."},
-    "context._keel.action_envelope.financial.amount.value": {"decision": "PUBLIC", "rationale": "Rail-native amount is authorable with caller-asserted provenance and its state companion."},
-    "context._keel.action_envelope.financial.currency.value": {"decision": "PUBLIC", "rationale": "Currency is authorable with caller-asserted provenance and guidance not to treat it as magnitude or conversion."},
-    "context._keel.action_envelope.financial.destination_digest.state": {"decision": "PUBLIC", "rationale": "Availability state is required for fail-closed destination-digest policies."},
-    "context._keel.action_envelope.financial.destination_digest.value": {"decision": "PUBLIC", "rationale": "Destination digest is authorable with caller-asserted provenance and its state companion."},
-    "context._keel.action_envelope.financial.moves_customer_value.state": {"decision": "PUBLIC", "rationale": "Availability state prevents an unknown value-movement classification from silently missing a rule."},
-    "context._keel.action_envelope.financial.moves_customer_value.value": {"decision": "PUBLIC", "rationale": "Keel-derived value-movement classification is published with its state companion and caveat."},
-    "context._keel.action_envelope.financial.operation.value": {"decision": "PUBLIC", "rationale": "Financial operation is authorable with caller-asserted catalog provenance and an open-ended MCP value-space warning."},
-    "context._keel.action_envelope.pricing.estimated_cost_usd_micros.state": {"decision": "PUBLIC", "rationale": "Availability state is the fail-closed branch for surfaces Keel cannot price."},
-    "context._keel.action_envelope.pricing.estimated_cost_usd_micros.value": {"decision": "PUBLIC", "rationale": "Keel-derived estimate is authorable only where pricing can be present and is paired with its state."},
-    "context._keel.agent_identity_verified": {"decision": "PUBLIC", "rationale": "Keel-derived runtime-key verification boolean is an authorable identity control."},
-    "context._keel.declared_intent": {"decision": "REMOVED", "rationale": "This raw caller assertion is not authorable and adds no safe policy control to the public skill."},
-    "context._keel.payment_currency": {"decision": "REMOVED", "rationale": "This legacy flat alias lacks the canonical envelope family's per-leaf state semantics; authors should use financial.currency.value with the amount state guard."}
-  },
-  "_pending_rationale": {
-    "context._keel.action_envelope.mapping.assurance.value": "Action Mapping assurance is declared shadow and non-authorable in the backend catalog and has no served state-F runtime; publishing it would imply an authoring contract that cannot be exercised.",
-    "context._keel.action_envelope.mapping.governance_action_id.value": "The governance action a mapping resolves to is a policy interpretation, not established handler semantics, and the mapping surface is not served on this revision.",
-    "context._keel.action_envelope.mapping.governance_action_version.value": "Pinning a governance action version is only meaningful once the mapping surface is served and its revision behaviour has executed tests.",
-    "context._keel.action_envelope.mapping.id.value": "Mapping identity is declared shadow and non-authorable in the backend catalog; the catalog's own warning says it is not yet resolvable at decision time.",
-    "context._keel.action_envelope.mapping.revision.value": "Revision pinning depends on mapping identity being resolvable, which the backend catalog states it is not yet."
-  },
-  "forbidden_strings": [
-    "Phase-0",
-    "A3-K",
-    "A3-P",
-    "proof-of-possession",
-    "buyer-principal"
-  ]
+    "action.attributes.trusted_facts.environment": {
+      "decision": "PUBLIC",
+      "rationale": "Connector-asserted preflight environment is an authorable exact-match contract."
+    },
+    "action.attributes.trusted_facts.max_uses": {
+      "decision": "PUBLIC",
+      "rationale": "Connector-asserted numeric use limit is an authorable preflight contract."
+    },
+    "action.attributes.trusted_facts.tool_name": {
+      "decision": "PUBLIC",
+      "rationale": "Connector-asserted preflight tool name is required by the shipped refund policy pattern."
+    },
+    "attrs.estimated_input_tokens": {
+      "decision": "PUBLIC",
+      "rationale": "Caller-asserted input-token estimate is explicitly authorable and labeled with its weaker provenance."
+    },
+    "attrs.estimated_output_tokens": {
+      "decision": "PUBLIC",
+      "rationale": "Caller-asserted output-token estimate is explicitly authorable and labeled with its weaker provenance."
+    },
+    "attrs.execution_mode": {
+      "decision": "PUBLIC",
+      "rationale": "Caller-asserted execution mode is a bounded authorable enum."
+    },
+    "attrs.model": {
+      "decision": "PUBLIC",
+      "rationale": "Caller-asserted model attribute is an authorable request field distinct from Keel's derived top-level model."
+    },
+    "attrs.provider": {
+      "decision": "PUBLIC",
+      "rationale": "Caller-asserted provider attribute is an authorable request field distinct from Keel's derived top-level provider."
+    },
+    "context._keel.action_envelope.action.access_level.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived access classification is authorable with explicit churn guidance in fields.md."
+    },
+    "context._keel.action_envelope.action.risk_tags.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived risk tags are authorable with explicit registry-churn guidance in fields.md."
+    },
+    "context._keel.action_envelope.authority.compute_lineage_only.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived agent.create_child lineage classification has a single documented boolean meaning."
+    },
+    "context._keel.action_envelope.authority.is_mutation.state": {
+      "decision": "PUBLIC",
+      "rationale": "Availability state lets authors fail closed when authority mutation classification is unknown."
+    },
+    "context._keel.action_envelope.authority.is_mutation.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived authority-mutation value is published together with its availability state."
+    },
+    "context._keel.action_envelope.connector.tool_schema_hash.state": {
+      "decision": "PUBLIC",
+      "rationale": "State-only contract lets authors require that a verified decision trace recorded a schema hash without claiming custody proof."
+    },
+    "context._keel.action_envelope.financial.amount.state": {
+      "decision": "PUBLIC",
+      "rationale": "Availability state is required to distinguish a real zero from an unavailable rail-native amount."
+    },
+    "context._keel.action_envelope.financial.amount.value": {
+      "decision": "PUBLIC",
+      "rationale": "Rail-native amount is authorable with caller-asserted provenance and its state companion."
+    },
+    "context._keel.action_envelope.financial.currency.value": {
+      "decision": "PUBLIC",
+      "rationale": "Currency is authorable with caller-asserted provenance and guidance not to treat it as magnitude or conversion."
+    },
+    "context._keel.action_envelope.financial.destination_digest.state": {
+      "decision": "PUBLIC",
+      "rationale": "Availability state is required for fail-closed destination-digest policies."
+    },
+    "context._keel.action_envelope.financial.destination_digest.value": {
+      "decision": "PUBLIC",
+      "rationale": "Destination digest is authorable with caller-asserted provenance and its state companion."
+    },
+    "context._keel.action_envelope.financial.moves_customer_value.state": {
+      "decision": "PUBLIC",
+      "rationale": "Availability state prevents an unknown value-movement classification from silently missing a rule."
+    },
+    "context._keel.action_envelope.financial.moves_customer_value.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived value-movement classification is published with its state companion and caveat."
+    },
+    "context._keel.action_envelope.financial.operation.value": {
+      "decision": "PUBLIC",
+      "rationale": "Financial operation is authorable with caller-asserted catalog provenance and an open-ended MCP value-space warning."
+    },
+    "context._keel.action_envelope.pricing.estimated_cost_usd_micros.state": {
+      "decision": "PUBLIC",
+      "rationale": "Availability state is the fail-closed branch for surfaces Keel cannot price."
+    },
+    "context._keel.action_envelope.pricing.estimated_cost_usd_micros.value": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived estimate is authorable only where pricing can be present and is paired with its state."
+    },
+    "context._keel.agent_identity_verified": {
+      "decision": "PUBLIC",
+      "rationale": "Keel-derived runtime-key verification boolean is an authorable identity control."
+    }
+  }
 }

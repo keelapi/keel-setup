@@ -29,8 +29,8 @@ helpers are local, read-only analysis or schema validation.
 
 ## Provenance
 
-`SOURCE.json` identifies the exact reviewed source revision from which this bundle was exported. This
-repository has orphan release history: it intentionally excludes internal specifications, production
-workflows, private repository history, and unrelated tools.
+`SOURCE.json` identifies this public bundle version and the files maintained only by the publication
+layer. This repository intentionally excludes internal specifications, production workflows, private
+repository history, and unrelated tools.
 
 Apache-2.0. See [`LICENSE`](LICENSE).

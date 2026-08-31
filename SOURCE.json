@@ -1,5 +1,7 @@
 {
   "bundle_schema_version": "keel.public_setup_bundle.v1",
+  "public_release_version": "2026-08-30.1",
+  "product_source_sha256": "271d9e95db11a9bdb677e45415520d87c6a2749841b3820977448b860e448482",
   "included_roots": [
     "keel-policy",
     "keel-setup",
@@ -8,7 +10,13 @@
   "included_files": [
     "tools/public_surface.json"
   ],
-  "source_commit": "ef6b92880f0729c336b3fad85e256135c91968da",
-  "source_merge_commit": "165c5f308bb339d8024f9fb1d66956e0940db2e7",
-  "source_repository": "keelapi/keel-skills"
+  "publication_layer_files": [
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    "README.md",
+    "SHA256SUMS",
+    "SOURCE.json",
+    "scripts/check_execute_contract.py",
+    "scripts/check_release_bundle.py"
+  ]
 }

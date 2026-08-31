@@ -60,7 +60,6 @@ def validate(
             failures.append(f"prohibited authority or certified-contract field: {key}")
 
     public_fields = set(manifest.get("fields", {}).get("PUBLIC", []))
-    pending_fields = set(manifest.get("fields", {}).get("PENDING_action_envelope", [])) | set(manifest.get("fields", {}).get("PENDING_other", []))
     provenance = provenance_artifact.get("fields", {}) if isinstance(provenance_artifact, dict) else {}
     if provenance_artifact.get("schema_version") != "1.0" or set(provenance) != public_fields:
         failures.append("pinned field-provenance artifact does not exactly cover the published field set")
@@ -75,7 +74,7 @@ def validate(
             by_field.setdefault(field, []).append((index, item))
         status = item.get("status")
         pinned_provenance = provenance.get(field) if isinstance(field, str) else None
-        if field in pending_fields or (isinstance(field, str) and field not in public_fields):
+        if isinstance(field, str) and field not in public_fields:
             if status != "unresolved":
                 failures.append(f"enforceability[{index}] unpublished field must be unresolved")
         elif isinstance(field, str) and item.get("provenance") != pinned_provenance:
