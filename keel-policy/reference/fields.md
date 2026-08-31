@@ -163,6 +163,8 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 | `context._keel.request_day_of_week` | integer | yes | keel_derived |
 | `context._keel.request_hour_utc` | integer | yes | keel_derived |
 | `context._keel.verified_agent_principal_id` | string | yes | keel_derived |
+| `context.provider_meta.data_retention` | string | yes | keel_derived |
+| `context.provider_meta.region` | string | yes | keel_derived |
 | `estimated_cost` | number | yes | keel_derived |
 | `estimated_cost_usd_micros` | integer | yes | keel_derived |
 | `model` | string | yes | keel_derived |

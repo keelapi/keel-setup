@@ -1,6 +1,6 @@
 ---
 name: keel-policy
-description: Author, audit, or assess enforceability of a Keel governance policy without activating it. Use for spending limits, approvals, blocked actions, model restrictions, policy safety reviews, or determining whether Keel has trustworthy runtime facts for a requested control. Produces a validated policy proposal and bounded enforceability report.
+description: Author, audit, or assess enforceability of a Keel governance policy for a basic or full authoring profile without activating it. Use for spending limits, approvals, blocked actions, model restrictions, policy safety reviews, or determining whether Keel has trustworthy runtime facts for a requested control. Produces a validated policy proposal and bounded enforceability report.
 ---
 
 # Authoring Keel policies
@@ -99,7 +99,12 @@ The validator reads `reference/field-provenance.json`, a release-pinned machine 
 set and provenance values are checked against the published catalog. A report cannot promote a caller-
 or connector-asserted field to `trusted` by relabelling it.
 
-1. **Gather evidence, opportunistically.** If the application's code or tool definitions are at
+1. **Get the authoring profile.** Accept `basic` or `full` as an input. If it was not supplied,
+   ask once which authoring profile the dashboard shows, and wait for the answer before drafting.
+   Do not infer it from a plan name, fetch entitlements, request a credential, or call Keel to
+   discover it. This skill holds no Keel credential.
+
+2. **Gather evidence, opportunistically.** If the application's code or tool definitions are at
    hand, read them: which connectors and tools the agent actually calls, what the tool names
    are, which ones move money or touch customers. This is evidence-gathering, not a
    prerequisite. If there is no application to inspect — an empty repo, a policy written before
@@ -110,9 +115,10 @@ or connector-asserted field to `trusted` by relabelling it.
 
    Code tells you which actions exist. It never tells you which ones the user wants governed.
 
-2. **Check expressibility early.** Before interviewing in depth about a restriction, check
-   whether the field vocabulary in `reference/fields.md` can express it at all. If it cannot,
-   say so immediately rather than after a long interview.
+3. **Check expressibility early.** Before interviewing in depth about a restriction, check
+   whether the selected profile's field vocabulary can express it at all. For `basic`, use the
+   whitelist below. For `full`, use `reference/fields.md`. If it cannot, say so immediately
+   rather than after a long interview.
 
    **Never approximate an unsupported restriction with a different field.** There is no
    file-path or repository-path field, so "may edit `src/` but not `.github/workflows/`" is not
@@ -120,21 +126,43 @@ or connector-asserted field to `trusted` by relabelling it.
    syntactically valid document that does not do what the user asked and cannot be observed
    failing. Say plainly that the restriction is not expressible, and what is.
 
-3. **Interview only where the answer changes the artifact.** Resolve material ambiguity, once —
+4. **Interview only where the answer changes the artifact.** Resolve material ambiguity, once —
    see *What requires a user decision*. This is not a questionnaire to complete before drafting;
    it is a set of questions worth asking only when the answer changes what you write.
 
-4. **Read the schema.** `reference/policy-document.schema.json` is the authoritative shape,
-   generated directly from Keel's own model. `reference/fields.md` lists every field you may
-   reference, with its type and provenance.
+5. **Read the schema.** `reference/policy-document.schema.json` is the authoritative shape,
+   generated directly from Keel's own model. For `full`, `reference/fields.md` lists every field
+   you may reference, with its type and provenance.
 
-5. **Draft, then work the checklist below.** Validate against the bundled JSON Schema before
+6. **Draft, then work the checklist below.** Validate against the bundled JSON Schema before
    showing anyone — it is standard Draft 2020-12, so any off-the-shelf validator works and you
    need no access to Keel.
 
-6. **Read it back in your own words, then hand it over.** See *Presentation and handoff*.
+7. **Read it back in your own words, then hand it over.** See *Presentation and handoff*.
 
-Never activate a policy yourself. Step 6 ends in a human decision, by design — see *Authority*.
+Never activate a policy yourself. Step 7 ends in a human decision, by design — see *Authority*.
+
+### Authoring profiles
+
+`full` uses the complete bundled schema and the authorable fields in `reference/fields.md`.
+
+For `basic`, the document must satisfy the full schema **and** every restriction below:
+
+- at most 10 rules;
+- only `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, and `contains` operators;
+- only `context.model`, `context.provider`, `context.provider_meta.region`,
+  `context.provider_meta.data_retention`, `context.estimated_cost_usd_micros`,
+  `context.prompt_token_count`, and `context.time_of_day` fields;
+- each condition is one leaf, or one top-level `all`/`any` containing leaves only; no nesting
+  and no `not`;
+- actions are limited to the schema's deny family (`deny` and `deny_if_*`),
+  `constrain_max_output_tokens`, and `require_human_review`; and
+- when the schema's `require_attestation` property is present, its `attestor` must be exactly
+  `project_owner`. Its required `timeout_seconds` is still a user decision under invariant 3.
+
+Never emit an explicit `allow` rule for `basic`. It is terminal at this authoring level and can
+shadow later denies. This does not change the unmatched-action fallback: actions matching no
+terminal rule are still allowed by the engine default.
 
 ## What requires a user decision
 
@@ -368,6 +396,8 @@ supposed to close.
 Work this before showing anyone a draft.
 
 - [ ] **Schema.** Validates against `reference/policy-document.schema.json`.
+- [ ] **Profile.** The authoring profile is known, and the document satisfies its additional
+      grammar, field, action, composition, and rule-count limits.
 - [ ] **Provenance.** For every rule, threshold, and parameter: name the user instruction that
       authorized it, or the explicit delegation that let you choose it. Anything you cannot
       attribute comes out of the JSON.
@@ -377,9 +407,9 @@ Work this before showing anyone a draft.
 - [ ] **Scope.** Each rule inspected on its own; none matches a broader subject than requested.
 - [ ] **Money.** Integer micros everywhere.
 - [ ] **Order.** Rule order actually produces the behaviour your readback describes.
-- [ ] **Fields.** Only fields from `fields.md`, and none used as a proxy for something it does
-      not mean. Any rule keyed on an envelope field marked ⚠ is deliberate, and the handoff says
-      the classification underneath it may move.
+- [ ] **Fields.** Only fields allowed by the selected profile, and none used as a proxy for
+      something it does not mean. Any rule keyed on an envelope field marked ⚠ is deliberate,
+      and the handoff says the classification underneath it may move.
 - [ ] **Trust.** Any threshold or gate on a `caller_asserted` field — which is every
       `financial.*` envelope field — is disclosed in the handoff as constraining what the caller
       declared, not what Keel measured.
@@ -438,6 +468,18 @@ considering, and that it is absent unless they ask for it.
 
 Then give them the JSON to paste into the policy editor in the Keel dashboard, where Keel runs
 its full validation, simulates the policy against recent real traffic, and only then saves it.
+
+If the dashboard rejects the save with `AuthoringLevelExceeded`, use its structured fields
+rather than giving a generic validation explanation:
+
+- `authoring_level` identifies the profile whose restrictions were exceeded;
+- `rule_index` is the zero-based index into `rules`; quote and explain that exact rule; and
+- `upgrade_to` identifies the profile or plan that accepts the rejected construct.
+
+Compare the indexed rule with the restrictions for `authoring_level` and name the precise
+change required. Never weaken or delete a user-requested control silently. Return a revised
+draft only after the human chooses between preserving the control by upgrading and changing
+the policy decision to fit the current profile.
 
 ## Authority — read this before proposing anything
 

@@ -74,6 +74,8 @@
       "context._keel.request_day_of_week",
       "context._keel.request_hour_utc",
       "context._keel.verified_agent_principal_id",
+      "context.provider_meta.data_retention",
+      "context.provider_meta.region",
       "estimated_cost",
       "estimated_cost_usd_micros",
       "model",
