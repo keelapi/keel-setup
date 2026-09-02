@@ -5,9 +5,9 @@ table below. The guidance around it is maintained by hand and does **not** regen
 table — re-apply it if you regenerate.
 
 **`CATALOG_VERSION` does not move when a field's provenance does.** Five financial fields were
-demoted from `keel_derived` to `caller_asserted` in keel-api under this same version string,
-and the stale table below gave no sign of it. Re-check provenance against
-`app/services/policy_authoring_catalog.py` rather than trusting the version to signal drift.
+demoted from `keel_derived` to `caller_asserted` under this same version string, and the stale
+table below gave no sign of it. Re-check provenance against the published field-provenance map
+for your release rather than trusting the version to signal drift.
 
 Use **only** fields marked authorable = yes. Fields with provenance `caller_asserted` are
 supplied by the caller and are not trustworthy evidence — Keel rejects allow/deny rules that
@@ -163,6 +163,8 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 | `context._keel.request_day_of_week` | integer | yes | keel_derived |
 | `context._keel.request_hour_utc` | integer | yes | keel_derived |
 | `context._keel.verified_agent_principal_id` | string | yes | keel_derived |
+| `context.provider_meta.data_retention` | string | yes | keel_derived |
+| `context.provider_meta.region` | string | yes | keel_derived |
 | `estimated_cost` | number | yes | keel_derived |
 | `estimated_cost_usd_micros` | integer | yes | keel_derived |
 | `model` | string | yes | keel_derived |

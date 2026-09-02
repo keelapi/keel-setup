@@ -49,6 +49,8 @@
     "context._keel.request_day_of_week": "keel_derived",
     "context._keel.request_hour_utc": "keel_derived",
     "context._keel.verified_agent_principal_id": "keel_derived",
+    "context.provider_meta.data_retention": "keel_derived",
+    "context.provider_meta.region": "keel_derived",
     "estimated_cost": "keel_derived",
     "estimated_cost_usd_micros": "keel_derived",
     "model": "keel_derived",

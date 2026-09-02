@@ -16,9 +16,9 @@ CONTRACT = ROOT / "keel-setup/reference/unified-execute-request.contract.json"
 HELPER = ROOT / "keel-setup/scripts/verify_execute.py"
 EXPECTED_CONTRACT_VERSION = "keel.public_unified_execute_request_contract.v1"
 EXPECTED_API_REPOSITORY = "keelapi/keel-api"
-EXPECTED_API_SOURCE_COMMIT = "4ce5f5def6258004861dfaeeef512e49afc87cfd"
-EXPECTED_API_MERGE_COMMIT = "c130f73d966fce6572aa5dc8ff48164b9e9dbf15"
-EXPECTED_API_OPENAPI_SHA256 = "40f9b7ef1ad7ab38409c6b97d36ec654afc94a40f98475b6cda06b331b355db9"
+EXPECTED_API_SOURCE_COMMIT = "b0103a5cbe04c5dcc913fa990313b2e2ee6cbf24"
+EXPECTED_API_MERGE_COMMIT = "f0f2f188bc39a17318683e5015c6551b238130cb"
+EXPECTED_API_OPENAPI_SHA256 = "4a0269a7d0f1ad7901cb9e9ea0549c6264700823996521fd377ad51dc18c4d46"
 
 
 def _canonical_sha256(value: Any) -> str:
