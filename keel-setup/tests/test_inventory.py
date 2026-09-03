@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import tempfile
 import unittest
@@ -10,6 +11,19 @@ SPEC = importlib.util.spec_from_file_location("inventory", SCRIPT)
 inventory = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(inventory)
+SKILL = pathlib.Path(__file__).resolve().parents[1] / "SKILL.md"
+
+
+def _write_openai_seam(path: pathlib.Path, *, base_url: str | None = None) -> None:
+    constructor = "OpenAI()" if base_url is None else f"OpenAI(base_url={base_url!r})"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "from openai import OpenAI\n"
+        f"client = {constructor}\n"
+        "def summarize(text):\n"
+        "    return client.responses.create(model='gpt-4o-mini', input=text)\n",
+        encoding="utf-8",
+    )
 
 
 def report():
@@ -61,12 +75,24 @@ class InventoryTest(unittest.TestCase):
 
     def test_full_schema_constraints_and_duplicate_identity_are_enforced(self):
         cases = []
-        missing = report(); del missing["paths"][0]["line"]; cases.append(missing)
-        unknown = report(); unknown["paths"][0]["extra"] = True; cases.append(unknown)
-        wrong_type = report(); wrong_type["paths"][0]["line"] = "one"; cases.append(wrong_type)
-        too_many = report(); too_many["paths"][0]["uncertainties"] = [str(index) for index in range(21)]; cases.append(too_many)
-        empty_signal = report(); empty_signal["paths"][0]["signal"] = ""; cases.append(empty_signal)
-        duplicate = report(); duplicate["paths"].append(dict(duplicate["paths"][0])); cases.append(duplicate)
+        missing = report()
+        del missing["paths"][0]["line"]
+        cases.append(missing)
+        unknown = report()
+        unknown["paths"][0]["extra"] = True
+        cases.append(unknown)
+        wrong_type = report()
+        wrong_type["paths"][0]["line"] = "one"
+        cases.append(wrong_type)
+        too_many = report()
+        too_many["paths"][0]["uncertainties"] = [str(index) for index in range(21)]
+        cases.append(too_many)
+        empty_signal = report()
+        empty_signal["paths"][0]["signal"] = ""
+        cases.append(empty_signal)
+        duplicate = report()
+        duplicate["paths"].append(dict(duplicate["paths"][0]))
+        cases.append(duplicate)
         for index, candidate in enumerate(cases):
             with self.subTest(index=index):
                 self.assertTrue(inventory.validate_coverage(candidate))
@@ -79,6 +105,288 @@ class InventoryTest(unittest.TestCase):
         candidate = report()
         candidate["does_not_establish"].remove("bypass_absence")
         self.assertTrue(any("missing required evidence boundaries" in item for item in inventory.validate_coverage(candidate)))
+
+
+class FastFirstRunTest(unittest.TestCase):
+    def test_trivial_openai_summarizer_selects_one_narrow_seam(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "service.py")
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "single_narrow_seam")
+        self.assertEqual(
+            {key: result["selected_seam"][key] for key in ("path", "provider", "eligibility")},
+            {
+                "path": "service.py",
+                "provider": "openai",
+                "eligibility": "eligible_for_local_review",
+            },
+        )
+        self.assertEqual(result["evidence_level"], "source_inspected")
+        self.assertIn("whole_application_protection", result["does_not_establish"])
+        self.assertIsInstance(result["scan"]["elapsed_ms"], float)
+
+    def test_multiple_application_calls_are_ambiguous_not_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "summary.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI()\n"
+                "def one(): return client.responses.create(model='a', input=[])\n"
+                "def two(): return client.chat.completions.create(model='b', messages=[])\n",
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root)
+            exhaustive = inventory.inspect(root)
+
+        self.assertEqual(result["decision"], "ambiguous_multiple_seams")
+        self.assertIsNone(result["selected_seam"])
+        self.assertEqual(len(result["candidates"]), 2)
+        self.assertTrue(exhaustive["paths"])
+        self.assertTrue(all(item["status"] == "unresolved" for item in exhaustive["paths"]))
+
+    def test_streaming_seam_is_blocked_instead_of_guessed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "service.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI()\n"
+                "result=client.responses.create(model='a', input=[], stream=True)\n",
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "blocked_structural_condition")
+        self.assertIsNone(result["selected_seam"])
+        self.assertIn("streaming", " ".join(result["candidates"][0]["reasons"]))
+
+    def test_test_double_does_not_compete_with_application_seam(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "service.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI()\n"
+                "result=client.responses.create(model='a', input=[])\n",
+                encoding="utf-8",
+            )
+            (root / "tests").mkdir()
+            (root / "tests" / "test_service.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI()\n"
+                "result=client.responses.create(model='fake', input=[])\n",
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "single_narrow_seam")
+        self.assertEqual(result["selected_seam"]["path"], "service.py")
+        self.assertFalse(any(item["test_only"] for item in result["candidates"]))
+        self.assertEqual(result["scan"]["files_considered"], 1)
+        self.assertEqual(result["scan"]["test_files_skipped"], 1)
+
+    def test_javascript_openai_call_requires_provider_import(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "service.ts").write_text(
+                "import OpenAI from 'openai';\n"
+                "const client = new OpenAI();\n"
+                "client.responses.create({model: 'a', input: []});\n",
+                encoding="utf-8",
+            )
+            selected = inventory.fast_inspect(root)
+            (root / "service.ts").write_text(
+                "const client = internalClient();\n"
+                "client.responses.create({model: 'a', input: []});\n",
+                encoding="utf-8",
+            )
+            unrelated = inventory.fast_inspect(root)
+
+        self.assertEqual(selected["decision"], "single_narrow_seam")
+        self.assertEqual(selected["selected_seam"]["provider"], "openai")
+        self.assertEqual(unrelated["decision"], "no_obvious_seam")
+
+    def test_fast_output_never_echoes_source_or_secret_content(self):
+        marker = "not-a-real-secret-value"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "service.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI(api_key='" + marker + "')\n"
+                "result=client.responses.create(model='a', input=[])\n",
+                encoding="utf-8",
+            )
+            rendered = json.dumps(inventory.fast_inspect(root))
+
+        self.assertNotIn(marker, rendered)
+        self.assertNotIn("api_key", rendered)
+
+    def test_fast_output_never_echoes_a_credential_shaped_path(self):
+        marker = "sk-not-a-real-secret-value"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / f"{marker}.py")
+            rendered = json.dumps(inventory.fast_inspect(root))
+
+        self.assertNotIn(marker, rendered)
+        self.assertIn("ambiguous_sensitive_path", rendered)
+
+    def test_scan_limit_refuses_selection_and_reports_truncation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "a.py").write_text("value = 1\n", encoding="utf-8")
+            (root / "b.py").write_text(
+                "from openai import OpenAI\nclient=OpenAI()\n"
+                "result=client.responses.create(model='a', input=[])\n",
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root, max_files=1)
+
+        self.assertEqual(result["decision"], "ambiguous_scan_truncated")
+        self.assertTrue(result["scan"]["truncated"])
+        self.assertIsNone(result["selected_seam"])
+
+    def test_truncated_scan_never_selects_one_candidate_when_second_seam_is_unseen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "aaa_app.py")
+            for index in range(inventory.FAST_MAX_FILES - 1):
+                (root / f"middle_{index:03d}.py").write_text("value = 1\n", encoding="utf-8")
+            _write_openai_seam(root / "zzz_worker" / "batch.py")
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "ambiguous_scan_truncated")
+        self.assertIsNone(result["selected_seam"])
+        self.assertTrue(result["scan"]["truncated"])
+        self.assertEqual(len(result["candidates"]), 1)
+
+    def test_test_files_do_not_consume_fast_scan_file_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index in range(25):
+                test_path = root / "tests" / f"test_{index:03d}.py"
+                test_path.parent.mkdir(parents=True, exist_ok=True)
+                test_path.write_text("value = 1\n", encoding="utf-8")
+            _write_openai_seam(root / "zapp" / "service.py")
+            result = inventory.fast_inspect(root, max_files=1)
+
+        self.assertEqual(result["decision"], "single_narrow_seam")
+        self.assertEqual(result["selected_seam"]["path"], "zapp/service.py")
+        self.assertEqual(result["scan"]["files_considered"], 1)
+        self.assertEqual(result["scan"]["test_files_skipped"], 25)
+        self.assertFalse(result["scan"]["truncated"])
+
+    def test_adjacent_raw_http_provider_bypass_blocks_single_seam_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "app" / "service.py")
+            (root / "app" / "worker.py").write_text(
+                "import httpx\n"
+                "def run(payload):\n"
+                "    return httpx.post('https://api.openai.com/v1/responses', json=payload)\n",
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "ambiguous_adjacent_bypass")
+        self.assertIsNone(result["selected_seam"])
+        self.assertIn("raw_http_provider", {item["request_kind"] for item in result["candidates"]})
+
+    def test_non_default_base_url_falls_back_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "service.py", base_url="http://internal-gateway.corp/v1")
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "blocked_structural_condition")
+        self.assertIsNone(result["selected_seam"])
+        self.assertIn("base_url", " ".join(result["candidates"][0]["reasons"]))
+
+    def test_literal_official_provider_base_url_remains_identifiable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "service.py", base_url="https://api.openai.com/v1")
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "single_narrow_seam")
+        self.assertEqual(result["selected_seam"]["provider"], "openai")
+
+    def test_lookalike_provider_hostname_is_not_treated_as_official(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "service.py", base_url="https://api.openai.com.attacker.invalid/v1")
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "blocked_structural_condition")
+        self.assertIsNone(result["selected_seam"])
+
+    def test_demo_or_example_surface_is_not_automatically_selected(self):
+        for directory_name in ("examples", "example", "demo", "demos", "samples", "docs", "scripts", "benchmarks", "notebooks"):
+            with self.subTest(directory=directory_name), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                _write_openai_seam(root / directory_name / "quickstart.py")
+                result = inventory.fast_inspect(root)
+
+            self.assertEqual(result["decision"], "ambiguous_nonproduction_surface")
+            self.assertIsNone(result["selected_seam"])
+            self.assertEqual(result["candidates"][0]["selection_exclusion"], "non_production_surface")
+
+    def test_provider_signal_in_other_supported_text_language_blocks_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "service.py")
+            (root / "worker.go").write_text(
+                'package worker\nconst endpoint = "https://api.openai.com/v1/responses"\n',
+                encoding="utf-8",
+            )
+            result = inventory.fast_inspect(root)
+
+        self.assertEqual(result["decision"], "ambiguous_adjacent_bypass")
+        self.assertIsNone(result["selected_seam"])
+
+    def test_skill_orders_first_gate_before_exhaustive_inventory(self):
+        text = SKILL.read_text(encoding="utf-8")
+        fast = text.index("## Fast First Run: zero-credential preparation")
+        gate = text.index("## First human gate")
+        verify = text.index("## Deterministic state-D verification")
+        deep = text.index("## Post-gate deep assurance")
+        final = text.index("## Coverage handoff")
+
+        self.assertLess(fast, gate)
+        self.assertLess(gate, verify)
+        self.assertLess(verify, deep)
+        self.assertLess(deep, final)
+        fast_section = text[fast:gate]
+        self.assertIn("Prepare the smallest fail-closed `/v1/execute` adapter", fast_section)
+        self.assertIn("narrow protocol-double test", fast_section)
+        self.assertIn("Do not block the first gate on unrelated", fast_section)
+
+    def test_first_handoff_is_bounded_and_deep_report_is_retained(self):
+        text = SKILL.read_text(encoding="utf-8")
+        first_handoff = text[
+            text.index("## First human gate") : text.index("### Client-key custody")
+        ]
+        final_handoff = text[
+            text.index("## Coverage handoff") : text.index("## Return loop")
+        ]
+
+        self.assertIn("Nothing is routing through Keel yet", first_handoff)
+        self.assertIn("No live routing", first_handoff)
+        self.assertIn("no check of other paths in this repo", first_handoff)
+        self.assertIn("Do not paste", first_handoff)
+        self.assertIn("the key here", first_handoff)
+        self.assertNotIn("every discovered execution path", first_handoff)
+        self.assertIn("every discovered execution path", final_handoff)
+        self.assertIn("machine-readable `does_not_establish`", final_handoff)
+        self.assertIn("Also found, not governed", final_handoff)
+
+    def test_skill_retains_execution_and_authority_boundaries(self):
+        text = SKILL.read_text(encoding="utf-8")
+
+        for required in (
+            "deterministic proof remains only `POST /v1/execute`",
+            "never introduce or preserve\n`/v1/proxy/*`",
+            "managed MCP `:call` path",
+            "MCP `:decide` and `:prepare` are not execution",
+            "Never mint, exchange, or install it on their behalf",
+            "An environment variable is transcript hygiene, not process isolation",
+        ):
+            self.assertIn(required, text)
 
 
 if __name__ == "__main__":

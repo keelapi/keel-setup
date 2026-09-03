@@ -30,6 +30,39 @@ Keel is an authorization boundary, not an agent runtime. This WP10 skill establi
 deterministic allowed request completes and an intended denied request is stopped before provider
 dispatch through `POST /v1/execute`. Action Mapping and state F are not implemented by this skill.
 
+## Capability and release trust gate
+
+Setup requires repository and terminal access. If either is unavailable, stop and tell the human to
+open the repository and this request in a coding-agent environment such as Codex. Do not simulate
+repository setup in a plain chat.
+
+Use only Keel's public release bundle at an immutable 40-character commit SHA. Read its `README.md`,
+this file, and the shared Constitution in full. Before running a bundled helper, verify every checked
+out product file against `SHA256SUMS`. If the pin, files, or checksum cannot be established, stop; do
+not use mutable `main`, install a substitute package, or reconstruct the release from memory.
+
+For model execution, deterministic proof remains only `POST /v1/execute`; never introduce or preserve
+`/v1/proxy/*`. An eligible consequential MCP execution is governed only when dispatched through the
+managed MCP `:call` path. MCP `:decide` and `:prepare` are not execution.
+
+## Lifecycle
+
+For a genuinely new checkout, use this order:
+
+```text
+FAST DISCOVERY
+  -> ONE NARROW EXECUTION SEAM
+  -> MINIMAL SAFE INTEGRATION PREPARATION
+  -> FIRST HUMAN GATE
+  -> DETERMINISTIC ALLOW/DENY VERIFICATION
+  -> NARROW REAL APPLICATION PATH
+  -> DEEP INVENTORY / COVERAGE / BYPASS REVIEW
+  -> FULL ASSURANCE HANDOFF
+```
+
+The first gate is an early authority handoff, not a setup-complete claim. Exhaustive assurance remains
+mandatory later in the lifecycle and must not be silently dropped.
+
 ## Evidence language
 
 - `runtime-observed` means this invocation executed the named bounded path and captured the full result
@@ -72,33 +105,73 @@ Stages are `discovery`, `waiting_for_human`, `integration_ready`, `state_d_verif
 `mapping_proposed`, `waiting_for_mapping_activation`, `state_f_verified`, `verified`, `drifted`, and
 `blocked`. This revision reaches only the state-D stages. A state file naming a state-F stage is
 reported as unsupported on this revision and is never read as progress. A later invocation resumes the
-earliest unmet stage; it does not recreate projects, connectors, policies, mappings, or keys.
+earliest unmet stage; it does not recreate projects, connectors, policies, mappings, or keys. While the
+stage is `discovery` or `waiting_for_human`, count-based drift and maintenance cadence must not delay
+the first gate. Record `waiting_for_human` only after every named path exists and is actually changed
+in the working tree, one changed production source contains the prepared `/v1/execute` integration,
+and every required focused check passed. Resume revalidates those
+local files before returning to the gate. Validate the updated state with `--validate-only`, and do not
+place source text or report content in the state file.
 
-## Zero-credential preparation
+## Fast First Run: zero-credential preparation
 
-Before asking for any account or credential:
+Fast First Run exists only to reach the first human-owned authority gate safely. It does not establish
+whole-application coverage. Before asking for any account or credential:
 
 1. Read repository instructions and preserve unrelated work.
-2. Run `scripts/inventory.py` or inspect equivalently. Inventory model SDKs and direct HTTP calls, MCP
-   servers/clients/tool registrations/handlers, background work, nested calls, direct handler paths,
-   streaming, credentials and egress signals. Treat all classifications as heuristics.
-3. Record each path as `protected`, `governed_routed`, `intentionally_unprotected`, or `unresolved` in a
-   report conforming to `reference/coverage.schema.json`. This schema deliberately has no
-   `verified_protected` state. Source inventory emits only `source_inspected` + `unresolved` entries;
-   `protected` or `governed_routed` requires per-entry `runtime_observed` evidence, and
-   `intentionally_unprotected` requires a human assertion.
-4. Prepare the narrow `/v1/execute` adapter and protocol-double tests. Send provider-native
-   `input.messages`; never introduce or preserve `/v1/proxy/*`.
-5. Delegate policy authoring, audit, and enforceability to `keel-policy`. Setup may not rewrite a policy
-   to make onboarding pass.
+2. Run the bounded targeted search first:
 
-Tool names, descriptions, schemas, HTTP verbs, database methods, payment SDKs, and IAM calls are useful
-risk signals, not trusted semantics. Report alternate and bypass paths rather than hiding them.
+   ```text
+   python3 keel-setup/scripts/inventory.py --fast --root .
+   ```
+
+   It reports request-site candidates, selection status, scan limits, and elapsed milliseconds without
+   printing source lines. It is not the coverage report.
+3. Continue only when it reports `single_narrow_seam`. Inspect that request site, its provider/model
+   construction, request/response shape, caller, and immediately adjacent alternate path. Confirm it
+   is non-streaming and can be changed without altering unrelated behavior.
+4. If the result is anything other than `single_narrow_seam`, do not guess for speed. A truncated
+   scan, multiple or unresolved provider signals, a non-production-only surface, a custom provider
+   base URL, streaming, or another structural condition requires bounded targeted inspection or a
+   blocker. The scanner never treats one candidate from a truncated scan as safe to select.
+5. Prepare the smallest fail-closed `/v1/execute` adapter for that seam. Generate freshness at the last
+   responsible moment, send provider-native `input.messages`, map only the response fields the
+   application already needs, and preserve unrelated behavior. Use a `KEEL_API_KEY` placeholder only.
+6. Run four focused checks: syntax/compile the changed integration file, load the changed module in a
+   repository-safe isolated check, pass the narrow protocol-double test, and search the selected
+   package/directory for provider hostnames or direct/raw HTTP bypasses. If an import/load could perform
+   an external effect, do not run it unsafely; use the repository's side-effect-free loader/test or stop
+   without recording the milestone. Do not block the first gate on unrelated lint suites or
+   whole-repository tests.
+7. Record only the local-preparation milestone, using the pinned public SHA and repository-relative
+   paths, then validate the state file and issue the concise first handoff:
+
+   ```text
+   python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json \
+     --mark-waiting-for-human --provider PROVIDER --pinned-skill-ref 40_HEX_SHA \
+     --application-revision REVISION --changed-path PATH \
+     --focused-check syntax_or_compile --focused-check module_load \
+     --focused-check protocol_double --focused-check adjacent_bypass_search
+   python3 keel-setup/scripts/setup_state.py --repo-root . \
+     --state .keel/setup-state.json --validate-only
+   ```
+
+   This operation cannot mark runtime verification or authority state.
+
+Before the first gate, do not launch exhaustive discovery of every background worker, egress path,
+streaming path, MCP surface, alternate provider, nested call, drift condition, or full coverage
+classification unless it is directly adjacent to the selected seam or needed to resolve an ambiguity.
+This deferral is ordering only. It is not permission to omit or hide those paths from the later report.
+
+Tool names, descriptions, schemas, HTTP verbs, and source structure are signals, not trusted semantics.
+Delegate policy authoring, audit, and enforceability to `keel-policy`; setup may not rewrite a policy to
+make onboarding pass.
 
 ## Optional observation before activation
 
 Use the sequence **Discover → Propose → Simulate/Test → Human Activate → Enforce/Review → Learn**.
-Observation is optional and never a waiting period.
+Observation is optional and never a waiting period. Skip it during Fast First Run unless the human has
+already supplied the bounded result and explaining it will not delay the first gate.
 
 The human may run the dashboard's existing recent-run simulation for an inactive policy and supply a
 redacted result. Do not request or use a dashboard session, JWT, CSRF token, passkey, or approval token.
@@ -116,16 +189,29 @@ the action. Do not mark the draft active, lower review or deny, require seven or
 or promote source/schema/preview evidence into trusted semantics. MCP `:prepare`, when released, is only
 a one-request non-dispatch advisory dry run; it is not enforcement or reusable authorization.
 
-## Human gate
+## First human gate
 
-When local preparation is complete, stop and say:
+When the narrow local preparation and focused checks are complete, stop with only the prepared seam,
+the exact human action, and one evidence limit. Adapt provider and path names, but keep it concise:
 
-> Sign in or create your Keel account in the dashboard. Choose the project, connect and validate the
-> provider, review the exact Quickstart or template control, and activate it yourself. Create a
-> client-scoped execution key and install it as `KEEL_API_KEY` through Keel's release-pinned local
-> credential helper, or this repository's untracked secret mechanism, outside this conversation. Do
-> not paste the key here. Tell me only `ready`, the provider, and the dashboard's allowed and denied
-> model pair.
+> One execution path is prepared for Keel. Nothing is routing through Keel yet.
+> Prepared: `PATH` -> `PROVIDER`.
+> Your step: open Keel, connect and validate `PROVIDER`, review and activate the Quickstart or template
+> control yourself, and install a client-scoped key as `KEEL_API_KEY` outside this chat. Do not paste
+> the key here. Reply `ready` with the allowed and denied model names Keel shows you.
+> This is local preparation on one path. No live routing, and no check of other paths in this repo, has
+> happened yet.
+
+When discovery is ambiguous, stop without preparing a guessed path:
+
+> I stopped before preparing anything. This repo has more than one plausible execution path, so
+> choosing one would be a guess.
+> What I found: `PATH_A`, `PATH_B`.
+> Tell me which is the production path, or say `inspect further` and I will widen the search before
+> touching code. Nothing has been changed.
+
+Do not attach the exhaustive coverage report, cadence detail, schema output, or the machine-readable
+`does_not_establish` list to this first handoff. Those belong in the final assurance handoff.
 
 Do not ask for a project ID unless non-secret application configuration genuinely requires one. Never
 ask for provider credentials, a Keel key value, setup tokens, cookies, dashboard bearer credentials,
@@ -183,6 +269,21 @@ protocol double does not make the application path runtime-observed. State D is 
 tested decision seam, not whole-application protection, bypass absence, provider effect, or independent
 verification.
 
+## Post-gate deep assurance
+
+After the human gate is satisfied and the deterministic pair and narrow application path have been
+attempted, perform the deferred assurance work. Run `scripts/inventory.py` without `--fast`, or inspect
+equivalently, across model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
+background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
+
+Record every discovered path as `protected`, `governed_routed`, `intentionally_unprotected`, or
+`unresolved` in a report conforming to `reference/coverage.schema.json`. This schema deliberately has
+no `verified_protected` state. Source inventory emits only `source_inspected` + `unresolved` entries;
+`protected` or `governed_routed` requires per-entry `runtime_observed` evidence, and
+`intentionally_unprotected` requires a human assertion. Run the broader relevant lint/test suites now,
+and preserve every unresolved alternate, direct, background, streaming, credential, egress, and MCP
+path in the final report.
+
 ## State-D failure playbook
 
 Match the exact fields before naming a cause. The response body's authorization tuple outranks the HTTP
@@ -234,16 +335,28 @@ Report:
 `verified_protected`. Stronger claims require separately designed credential/egress containment and
 independent downstream observation.
 
+If the deterministic and real-path checks pass for one seam but deep assurance finds bypasses, report
+them as one inseparable status:
+
+> Verified: `PATH` denies `DENIED_MODEL` and allows `ALLOWED_MODEL` through Keel. That observed path is
+> `governed_routed`.
+> Also found, not governed: `N` other paths reach a provider without passing through Keel — `PATH_X`,
+> `PATH_Y`.
+> The app is not fully behind Keel. One observed path is; each remaining path needs the same change or
+> an explicit human decision to leave it ungoverned.
+
 ## Return loop
 
 Return behaviour is milestone-based first and count-based second. A completed step the human owns is
 never redone because the invocation number changed; the thresholds are cadence, not authority. The
 helper reports what is due in its `due` list.
 
-- **Invocation 2 — resume.** Resume the earliest unmet stage. Re-read the diff and local state, and do
-  not create a duplicate project, connector, policy, or key. If the human gate is satisfied, run the
-  deterministic pair verifier and then the narrowest real application path. If it is not satisfied,
-  improve local tests or the coverage inventory and repeat one concise human request.
+- **Invocation 2 — resume.** Resume the earliest unmet stage. Re-read the narrow diff and local state,
+  and do not create a duplicate project, connector, policy, or key. `waiting_for_human` returns directly
+  to the concise gate without repeating Fast First Run. If the gate is satisfied, run the deterministic
+  pair verifier and narrow application path, then continue the deferred deep assurance work. If it is
+  not satisfied, improve only a focused local check that is useful without the credential and repeat
+  one concise human request.
 - **Invocation 5 — drift audit.** Search for new `/v1/proxy/` references, new direct provider clients,
   new MCP tools or schemas, direct-handler and adapter bypasses, background execution, streaming
   additions, a stale model pair, secret-tracking regressions, and call sites still carrying
@@ -255,10 +368,11 @@ helper reports what is due in its `due` list.
   them. Produce a fresh `does_not_establish` list. Do not replay signup, reconnect a healthy
   provider, mint a replacement key, or repeat the original onboarding questions.
 
-For invocations 3–4, 6–19, and 21+, take the earliest unmet milestone. Run the drift audit again
-whenever five invocations have elapsed since the last one, and the maintenance review whenever twenty
-have elapsed. Record the invocation at which each ran so the cadence advances instead of firing every
-time.
+For invocations 3–4, 6–19, and 21+, take the earliest unmet milestone. Drift and maintenance cadence
+starts only after the first human gate has been reached; it cannot force exhaustive work while the
+stage is `discovery` or `waiting_for_human`. After that gate, run the drift audit again whenever five
+invocations have elapsed since the last one, and the maintenance review whenever twenty have elapsed.
+Record the invocation at which each ran so the cadence advances instead of firing every time.
 
 ## Feedback
 

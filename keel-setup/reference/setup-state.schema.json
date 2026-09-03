@@ -32,7 +32,35 @@
       "type": "array",
       "maxItems": 500,
       "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+      }
+    },
+    "pre_gate_checks": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["status", "checks", "checked_at"],
+      "properties": {
+        "status": {"const": "passed"},
+        "checks": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "syntax_or_compile",
+              "module_load",
+              "protocol_double",
+              "adjacent_bypass_search"
+            ]
+          }
+        },
+        "checked_at": {"type": "string", "format": "date-time", "maxLength": 64}
+      }
     },
     "discovered_mcp_source_identifiers": {
       "type": "array",
