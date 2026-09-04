@@ -275,53 +275,63 @@ evidence and do not authorize the agent to perform a dashboard action.
 
 When narrow local preparation and focused checks are complete, stop with only the following block.
 Render it verbatim, substituting only the helper-established `PATH`; add no preamble, summary, report,
-or follow-up commentary:
+or follow-up commentary. Render every guided-handoff block as ordinary Markdown paragraphs. Do not
+wrap it in a blockquote or code fence, add forced line-break backslashes, or emit HTML space entities.
 
-> I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
->
-> **Step 1 of 3 — Connect OpenAI**
->
-> In the Keel dashboard, open **Set up Keel**.
->
-> Under **Connect OpenAI for the first proof**, click **Connect a provider**. On **Connectors**, click
-> **Add connector**, select **OpenAI**, and click **Next**. Enter a **Display name** and your
-> **API key secret**, click **Review**, then **Save connector**. Click **Test connection**.
->
-> Do not paste your OpenAI API key here.
->
-> Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
->
-> This is local preparation for one call. No live Keel request or check of other application paths has
-> happened yet.
+I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
+
+**Step 1 of 3 — Connect OpenAI**
+
+In the Keel dashboard, open **Set up Keel**.
+
+Under **Connect OpenAI for the first proof**, click **Connect a provider**.
+
+On **Connectors**, click **Add connector**, select **OpenAI**, and click **Next**.
+
+Enter a **Display name** and your **API key secret**, click **Review**, then **Save connector**.
+
+Click **Test connection**.
+
+Do not paste your OpenAI API key here.
+
+Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
+
+This is local preparation for one call. No live Keel request or check of other application paths has
+happened yet.
 
 After the human replies `done`, treat connector health only as human-asserted and show only this block:
 
-> **Step 2 of 3 — Turn on your first Keel policy**
->
-> Return to **Set up Keel**. Read **What this setup applies** in step 1. Then, under **Set up Production Governance**,
-> click **Apply Production Governance**. This saves an inactive policy; it does not turn it on.
->
-> Under **Your allowed/denied pair**, click **Copy**. Then click **Review and turn it on**. On
-> **Policies**, switch **Production Governance** on and confirm **Turn on**.
->
-> When its status says **Active**, paste the three copied lines here. They contain only provider and
-> model names, not a credential.
+**Step 2 of 3 — Turn on your first Keel policy**
+
+Return to **Set up Keel**.
+
+Read **What this setup applies** in step 1. Then, under **Set up Production Governance**, click
+**Apply Production Governance**. This saves an inactive policy; it does not turn it on.
+
+Under **Your allowed/denied pair**, click **Copy**. Then click **Review and turn it on**.
+
+On **Policies**, switch **Production Governance** on and confirm **Turn on**.
+
+When its status says **Active**, paste the three copied lines here. They contain only provider and
+model names, not a credential.
 
 Accept only the dashboard's three-line `provider`, `allowed model`, and `denied model` block at this
 step. Do not accept, request, or inspect a credential. Treat the pair and Active status as
 human-asserted. Then show only this block:
 
-> **Step 3 of 3 — Create your Keel Runtime key**
->
-> Open **API Keys** in Keel and click **Create Key**. Enter a name such as `Local setup`, leave
-> **Runtime key** selected, and click **Create Key**. Copy the key when Keel shows it; it appears only
-> once.
->
-> Do not paste the key here. Your app needs it available as `KEEL_API_KEY` outside this conversation.
->
-> If you already know how to make `KEEL_API_KEY` available to this Codex session, do that and reply
-> `ready`. Otherwise reply `help me install it` and tell me whether you use Codex desktop, Codex CLI,
-> or another terminal/runtime. I will give you environment-specific steps without asking for the key.
+**Step 3 of 3 — Create your Keel Runtime key**
+
+Open **API Keys** in Keel and click **Create Key**.
+
+Enter a name such as `Local setup`, leave **Runtime key** selected, and click **Create Key**.
+
+When Keel shows the key, copy it; it appears only once.
+
+Do not paste the key here. Your app needs it available as `KEEL_API_KEY` outside this conversation.
+
+If you already know how to make `KEEL_API_KEY` available to this Codex session, do that and reply
+`ready`. Otherwise reply `help me install it` and tell me whether you use Codex desktop, Codex CLI,
+or another terminal/runtime. I will give you environment-specific steps without asking for the key.
 
 If the human asks for installation help, never imply that exporting a variable in an unrelated shell
 changes an already-running Codex process. Explain when the relevant process must be restarted, preserve
@@ -335,11 +345,13 @@ OpenAI-specific, and request explicit direction for bounded provider-specific se
 
 When discovery is ambiguous, stop without preparing a guessed path:
 
-> I stopped before preparing anything. This repo has more than one plausible execution path, so
-> choosing one would be a guess.
-> What I found: `PATH_A`, `PATH_B`.
-> Tell me which is the production path, or say `inspect further` and I will widen the search before
-> touching code. Nothing has been changed.
+I stopped before preparing anything. This repo has more than one plausible execution path, so
+choosing one would be a guess.
+
+What I found: `PATH_A`, `PATH_B`.
+
+Tell me which is the production path, or say `inspect further` and I will widen the search before
+touching code. Nothing has been changed.
 
 Do not attach the exhaustive coverage report, cadence detail, schema output, or the machine-readable
 `does_not_establish` list to this first handoff. Those belong in the final assurance handoff.

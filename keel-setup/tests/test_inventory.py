@@ -425,27 +425,38 @@ class FastFirstRunTest(unittest.TestCase):
     def test_first_human_gate_is_a_canonical_verbatim_template(self):
         text = SKILL.read_text(encoding="utf-8")
         gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
-        canonical = """> I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
->
-> **Step 1 of 3 — Connect OpenAI**
->
-> In the Keel dashboard, open **Set up Keel**.
->
-> Under **Connect OpenAI for the first proof**, click **Connect a provider**. On **Connectors**, click
-> **Add connector**, select **OpenAI**, and click **Next**. Enter a **Display name** and your
-> **API key secret**, click **Review**, then **Save connector**. Click **Test connection**.
->
-> Do not paste your OpenAI API key here.
->
-> Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
->
-> This is local preparation for one call. No live Keel request or check of other application paths has
-> happened yet."""
+        canonical = """I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
+
+**Step 1 of 3 — Connect OpenAI**
+
+In the Keel dashboard, open **Set up Keel**.
+
+Under **Connect OpenAI for the first proof**, click **Connect a provider**.
+
+On **Connectors**, click **Add connector**, select **OpenAI**, and click **Next**.
+
+Enter a **Display name** and your **API key secret**, click **Review**, then **Save connector**.
+
+Click **Test connection**.
+
+Do not paste your OpenAI API key here.
+
+Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
+
+This is local preparation for one call. No live Keel request or check of other application paths has
+happened yet."""
 
         self.assertIn("Render it verbatim", gate)
         self.assertIn("substituting only", gate)
         self.assertIn("add no preamble", gate)
         self.assertIn(canonical, gate)
+        self.assertIn("ordinary Markdown paragraphs", gate)
+        self.assertIn("Do not\nwrap it in a blockquote or code fence", gate)
+        self.assertIn("forced line-break backslashes", gate)
+        self.assertIn("HTML space entities", gate)
+        self.assertNotIn("> I prepared", gate)
+        self.assertNotIn("> **Step", gate)
+        self.assertNotIn("&#x20;", gate)
 
     def test_guided_handoff_uses_current_dashboard_terms_one_phase_at_a_time(self):
         text = SKILL.read_text(encoding="utf-8")
