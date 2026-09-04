@@ -33,10 +33,16 @@ SCHEMA_VERSION = "1.0"
 MAX_STRING_LENGTH = 512
 REQUIRED_PRE_GATE_CHECKS = (
     "syntax_or_compile",
+    "fail_closed_integration_review",
+    "adjacent_bypass_search",
+)
+LEGACY_PRE_GATE_CHECKS = (
+    "syntax_or_compile",
     "module_load",
     "protocol_double",
     "adjacent_bypass_search",
 )
+ALLOWED_PRE_GATE_CHECKS = set(REQUIRED_PRE_GATE_CHECKS) | set(LEGACY_PRE_GATE_CHECKS)
 INTEGRATION_SOURCE_SUFFIXES = {
     ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts",
     ".go", ".rs", ".java", ".kt", ".rb", ".php", ".cs",
@@ -182,7 +188,11 @@ def validate_state(state: Any) -> list[str]:
                     pre_gate_checks.get("status") != "passed"
                     or not isinstance(recorded_checks, list)
                     or any(not isinstance(item, str) for item in recorded_checks)
-                    or set(recorded_checks) != set(REQUIRED_PRE_GATE_CHECKS)
+                    or (
+                        not set(REQUIRED_PRE_GATE_CHECKS).issubset(recorded_checks)
+                        and set(recorded_checks) != set(LEGACY_PRE_GATE_CHECKS)
+                    )
+                    or not set(recorded_checks).issubset(ALLOWED_PRE_GATE_CHECKS)
                 ):
                     failures.append("waiting_for_human requires every focused pre-gate check to pass")
     return failures
@@ -478,7 +488,12 @@ def mark_waiting_for_human(
         return ["pinned skill ref must be an immutable 40-character lowercase commit SHA"]
     if not changed_paths:
         return ["recording the first human gate requires at least one --changed-path"]
-    if set(focused_checks or []) != set(REQUIRED_PRE_GATE_CHECKS):
+    recorded_check_set = set(focused_checks or [])
+    checks_are_current = set(REQUIRED_PRE_GATE_CHECKS).issubset(recorded_check_set)
+    checks_are_legacy = recorded_check_set == set(LEGACY_PRE_GATE_CHECKS)
+    if not (checks_are_current or checks_are_legacy) or not recorded_check_set.issubset(
+        ALLOWED_PRE_GATE_CHECKS
+    ):
         return [
             "recording the first human gate requires all focused checks to pass: "
             + ", ".join(REQUIRED_PRE_GATE_CHECKS)

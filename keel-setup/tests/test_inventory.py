@@ -353,8 +353,90 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertLess(deep, final)
         fast_section = text[fast:gate]
         self.assertIn("Prepare the smallest fail-closed `/v1/execute` adapter", fast_section)
-        self.assertIn("narrow protocol-double test", fast_section)
+        self.assertIn("Creating, editing, or requiring a repository protocol-double test is normally", fast_section)
+        self.assertIn("Do not perform a web search during Fast First Run", text[:gate])
+        self.assertIn("Do not add or edit application\n   tests, README files", fast_section)
+        self.assertIn("without importing or executing it", fast_section)
         self.assertIn("Do not block the first gate on unrelated", fast_section)
+        post_gate_section = text[gate:final]
+        self.assertIn("create or update its narrow protocol-double test", post_gate_section)
+        self.assertIn("application setup documentation", post_gate_section)
+
+    def test_fast_first_run_preserves_client_hook_callable_contract(self):
+        text = SKILL.read_text(encoding="utf-8")
+        fast = text[
+            text.index("## Fast First Run: zero-credential preparation") :
+            text.index("## First human gate")
+        ]
+
+        self.assertIn("record the selected function or method's externally callable signature", fast)
+        self.assertIn("`summarize(text, *, client=None, model=None)`", fast)
+        self.assertIn("`summarize(text, *, model=None)`", fast)
+        self.assertIn("must not silently become", fast)
+        self.assertIn("compatibility of the recorded callable parameters and defaults", fast)
+        self.assertIn("run that one focused test before the gate", fast)
+        self.assertIn("stop for explicit human direction", fast)
+        self.assertIn("Do not run broader tests", fast)
+
+    def test_deterministic_golden_path_precedes_model_driven_fallback(self):
+        text = SKILL.read_text(encoding="utf-8")
+        fast = text[
+            text.index("## Fast First Run: zero-credential preparation") :
+            text.index("## First human gate")
+        ]
+
+        deterministic = fast.index("### Deterministic golden path")
+        fallback = fast.index("### Model-driven fallback")
+        self.assertLess(deterministic, fallback)
+        self.assertIn("fast_first_run.py", fast[deterministic:fallback])
+        self.assertIn("When the result is `ready_for_human`", fast[deterministic:fallback])
+        self.assertIn("consult or cite saved memory", fast[deterministic:fallback])
+        self.assertIn("enumerate bundle files", fast[deterministic:fallback])
+        self.assertIn("run the release verifier separately", fast[deterministic:fallback])
+        self.assertIn("rediscover the seam", fast[deterministic:fallback])
+        self.assertIn("handle setup state separately", fast[deterministic:fallback])
+        self.assertIn("repeat\nvalidation or tests", fast[deterministic:fallback])
+        self.assertIn("`diff_truncated` is `false`, do not rerun `git diff`", fast[deterministic:fallback])
+        self.assertIn("run exactly one targeted\n`git diff`", fast[deterministic:fallback])
+        for outcome in (
+            "ambiguous",
+            "unsupported_shape",
+            "model_review_required",
+            "unsafe_contract_change",
+            "validation_failed",
+            "untrusted_bundle",
+        ):
+            self.assertIn(f"`{outcome}`", fast[deterministic:fallback])
+
+    def test_fresh_golden_path_owns_trust_ignore_and_state_initialization(self):
+        text = SKILL.read_text(encoding="utf-8")
+        deterministic = text.index("### Deterministic golden path")
+        fallback = text.index("### Model-driven fallback")
+        direct_state_command = text.index(
+            "python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json"
+        )
+
+        self.assertGreater(direct_state_command, fallback)
+        before_deterministic = text[:deterministic]
+        self.assertIn("do not run `setup_state.py`", before_deterministic)
+        self.assertIn("`fast_first_run.py` owns fresh state initialization", before_deterministic)
+        self.assertIn("Do not separately run or inspect\n`scripts/check_release_bundle.py`", before_deterministic)
+
+    def test_first_human_gate_is_a_canonical_verbatim_template(self):
+        text = SKILL.read_text(encoding="utf-8")
+        gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
+        canonical = """> One execution path is prepared for Keel. Nothing is routing through Keel yet.
+> Prepared: `PATH` -> `PROVIDER`.
+> Your step: open Keel, connect and validate `PROVIDER`, review and activate the Quickstart or template
+> control yourself, and install a client-scoped key as `KEEL_API_KEY` outside this chat. Do not paste
+> the key here. Reply `ready` with the allowed and denied model names Keel shows you.
+> This is local preparation on one path. No live routing, and no check of other paths in this repo, has
+> happened yet."""
+
+        self.assertIn("Render it verbatim", gate)
+        self.assertIn("substituting only", gate)
+        self.assertIn("add no preamble", gate)
+        self.assertIn(canonical, gate)
 
     def test_first_handoff_is_bounded_and_deep_report_is_retained(self):
         text = SKILL.read_text(encoding="utf-8")

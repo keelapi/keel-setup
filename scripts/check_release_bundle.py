@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-09-03.1"
-PRODUCT_SOURCE_SHA256 = "6c06fdf1f7aa53e842e1323e639b3ac2261b0ff402bda68f8b614103d8a7549a"
+PUBLIC_RELEASE_VERSION = "2026-09-03.2"
+PRODUCT_SOURCE_SHA256 = "c281a5d173588c99e7b79a31d24cbfbe17779e2d50a8fc3d66ae533310d933ca"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -43,11 +43,14 @@ EXPECTED_FILES = {
     "keel-setup/reference/coverage.schema.json",
     "keel-setup/reference/setup-state.schema.json",
     "keel-setup/reference/unified-execute-request.contract.json",
+    "keel-setup/scripts/fast_first_run.py",
     "keel-setup/scripts/inventory.py",
     "keel-setup/scripts/setup_state.py",
     "keel-setup/scripts/verify_execute.py",
     "keel-setup/tests/test_inventory.py",
     "keel-setup/tests/test_execute_request_contract.py",
+    "keel-setup/tests/fixtures/fast_first_run_cases.py",
+    "keel-setup/tests/test_fast_first_run.py",
     "keel-setup/tests/test_setup_state.py",
     "keel-setup/tests/test_verify_execute.py",
     "scripts/check_release_bundle.py",

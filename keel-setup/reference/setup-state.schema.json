@@ -47,12 +47,13 @@
         "status": {"const": "passed"},
         "checks": {
           "type": "array",
-          "minItems": 4,
+          "minItems": 3,
           "maxItems": 4,
           "uniqueItems": true,
           "items": {
             "enum": [
               "syntax_or_compile",
+              "fail_closed_integration_review",
               "module_load",
               "protocol_double",
               "adjacent_bypass_search"

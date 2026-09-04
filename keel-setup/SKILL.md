@@ -36,10 +36,22 @@ Setup requires repository and terminal access. If either is unavailable, stop an
 open the repository and this request in a coding-agent environment such as Codex. Do not simulate
 repository setup in a plain chat.
 
-Use only Keel's public release bundle at an immutable 40-character commit SHA. Read its `README.md`,
-this file, and the shared Constitution in full. Before running a bundled helper, verify every checked
-out product file against `SHA256SUMS`. If the pin, files, or checksum cannot be established, stop; do
-not use mutable `main`, install a substitute package, or reconstruct the release from memory.
+Use only Keel's public release bundle at an immutable 40-character commit SHA. Establish that the
+checkout is the official repository at that exact commit and has no local product-file changes. On a
+fresh deterministic golden path, read this file and the shared Constitution in full in one operation,
+then invoke `fast_first_run.py` immediately. The orchestrator runs the bounded release verifier before
+it loads another bundled helper or edits the application. Do not separately run or inspect
+`scripts/check_release_bundle.py`, enumerate the bundle, or inspect its Git history on that path. For a
+resume or model-driven fallback that does not invoke the orchestrator, run the bounded release verifier
+once before acting. It checks the exact public allowlist, provenance, and every product-file digest in
+`SHA256SUMS`; do not inspect or reason over the manifest one row at a time. The public `README.md` is
+navigation, not an additional authority source, and need not be read before Fast First Run unless one
+of the two required files explicitly refers to it for the current task.
+
+Do not perform a web search during Fast First Run. The pinned bundle and the application repository
+are the only normal pre-gate sources. Fetching the exact pinned Git object is allowed; if that object
+or a required bundled file cannot be read and verified, stop rather than searching for substitute
+instructions, current examples, provider documentation, or model names.
 
 For model execution, deterministic proof remains only `POST /v1/execute`; never introduce or preserve
 `/v1/proxy/*`. An eligible consequential MCP execution is governed only when dispatched through the
@@ -75,22 +87,22 @@ mandatory later in the lifecycle and must not be silently dropped.
 Always separate authorization, dispatch, provider acceptance, response completion, downstream effect,
 closure, and independent verification. An AI Permit establishes only what its signed fields bind.
 
-## Invocation state
+## Invocation state: resume and model-driven fallback
 
-Maintain `.keel/setup-state.json` in the application repository and confirm that exact path is ignored
-by git before anything is written to it. It holds no credential, setup token, provider secret, prompt
+On a genuinely fresh checkout, do not run `setup_state.py`, create `.keel/setup-state.json`, or edit
+`.gitignore` before the deterministic orchestrator. `fast_first_run.py` owns fresh state initialization,
+ignore handling, validation, and `waiting_for_human` persistence. Doing any of those steps separately
+would dirty the checkout or create prior state and must not divert an otherwise eligible golden path.
+
+For an existing state or model-driven fallback, maintain `.keel/setup-state.json` in the application
+repository and confirm that exact path is ignored by git before anything is written to it. It holds no credential, setup token, provider secret, prompt
 content, response body, dashboard session, or local claim of mapping authority. It records only schema
 version, invocation count, pinned skill ref, stage, provider, allowed and denied model, application
 revision, changed file paths, discovered MCP source identifiers, the last verification classifications,
 the cadence markers, and timestamps.
 
-Read and increment the count once at the start:
-
-```text
-python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json
-```
-
-The helper validates the file against `reference/setup-state.schema.json`, refuses a file carrying a
+When resuming or using the fallback, the state helper validates the file against
+`reference/setup-state.schema.json`, refuses a file carrying a
 bearer value, a credential assignment, a known credential prefix, an over-long string, or a
 mapping-authority field, increments once, and atomically persists the validated next state only after
 git confirms the exact path is ignored. It reports what the return loop is due to do. Exit `1` means
@@ -118,6 +130,44 @@ place source text or report content in the state file.
 Fast First Run exists only to reach the first human-owned authority gate safely. It does not establish
 whole-application coverage. Before asking for any account or credential:
 
+### Deterministic golden path
+
+After the pinned checkout and the single full read of the Constitution and this skill, run the pinned
+bundle's deterministic orchestrator immediately, before state handling or model-driven discovery:
+
+```text
+python3 BUNDLE/keel-setup/scripts/fast_first_run.py \
+  --bundle BUNDLE --bundle-sha 40_HEX_SHA --repo .
+```
+
+It supports exactly one clean Python application shape: one non-streaming official OpenAI SDK
+`responses.create` call using the default endpoint inside one synchronous top-level function with the
+recognized `client=None` injection hook and, at most, one directly coupled test file. It verifies the
+official immutable bundle, classifies the repository without importing it, reuses the bounded
+fast scanner, preserves the callable signature, generates the fixed `/v1/execute` adapter and coupled
+test when required, validates the narrow patch, and persists `waiting_for_human` only on a complete
+pass. It reads no credential and grants no authority.
+
+Do not search the web, consult or cite saved memory, enumerate bundle files, inspect verifier source,
+inspect bundle history, run the release verifier separately, rediscover the seam, reread the execute
+contract, regenerate the integration, handle setup state separately, rerun the scanner, repeat
+validation or tests, or add intermediate narration on a recognized golden path.
+
+When the result is `ready_for_human`, review the bounded unified diff carried in its `diff` result. If
+`diff_truncated` is `false`, do not rerun `git diff`. If it is `true`, run exactly one targeted
+`git diff` over `validation.changed_paths` before the gate. Do not remove this independent narrow-diff
+review. Render the canonical First human gate block verbatim, substituting only the helper-established
+`PATH` and `PROVIDER`, then wait. The helper result is source-inspected local preparation only; it is
+not runtime evidence.
+
+Any other outcome is a no-guess fallback. `ambiguous`, `unsupported_shape`,
+`model_review_required`, `unsafe_contract_change`, `validation_failed`, and `untrusted_bundle` do not
+permit the helper to record a successful milestone. The helper restores its own attempted edits after
+a failed transformation. Only then use the bounded model-driven flow below where the reported outcome
+allows it; never broaden the helper's claimed support from resemblance alone.
+
+### Model-driven fallback
+
 1. Read repository instructions and preserve unrelated work.
 2. Run the bounded targeted search first:
 
@@ -128,8 +178,11 @@ whole-application coverage. Before asking for any account or credential:
    It reports request-site candidates, selection status, scan limits, and elapsed milliseconds without
    printing source lines. It is not the coverage report.
 3. Continue only when it reports `single_narrow_seam`. Inspect that request site, its provider/model
-   construction, request/response shape, caller, and immediately adjacent alternate path. Confirm it
-   is non-streaming and can be changed without altering unrelated behavior.
+   construction, request/response shape, caller, and immediately adjacent alternate path. Before
+   editing, record the selected function or method's externally callable signature, including
+   parameter order, kinds, and defaults, and inspect only its directly relevant callers and tests for
+   use of a provider-client injection hook. Confirm the seam is non-streaming and can be changed
+   without altering unrelated behavior.
 4. If the result is anything other than `single_narrow_seam`, do not guess for speed. A truncated
    scan, multiple or unresolved provider signals, a non-production-only surface, a custom provider
    base URL, streaming, or another structural condition requires bounded targeted inspection or a
@@ -137,12 +190,35 @@ whole-application coverage. Before asking for any account or credential:
 5. Prepare the smallest fail-closed `/v1/execute` adapter for that seam. Generate freshness at the last
    responsible moment, send provider-native `input.messages`, map only the response fields the
    application already needs, and preserve unrelated behavior. Use a `KEEL_API_KEY` placeholder only.
-6. Run four focused checks: syntax/compile the changed integration file, load the changed module in a
-   repository-safe isolated check, pass the narrow protocol-double test, and search the selected
-   package/directory for provider hostnames or direct/raw HTTP bypasses. If an import/load could perform
-   an external effect, do not run it unsafely; use the repository's side-effect-free loader/test or stop
-   without recording the milestone. Do not block the first gate on unrelated lint suites or
-   whole-repository tests.
+   Preserve the selected seam's externally callable parameters and defaults unless the integration
+   genuinely requires a contract change and the human explicitly approves it. In particular,
+   `summarize(text, *, client=None, model=None)` must not silently become
+   `summarize(text, *, model=None)` merely because the implementation no longer uses the injected
+   provider client internally. Compatibility must not preserve a hook that can bypass Keel: when an
+   existing provider-client hook is used by a directly relevant caller or test and cannot safely keep
+   its behavior through Keel, run that one focused test before the gate. If it fails or a callable
+   contract change is necessary, stop for explicit human direction instead of recording
+   `waiting_for_human`.
+   Before the first gate, modify only the production integration path and an unavoidable dependency
+   manifest when the existing runtime has no suitable HTTP facility. Do not add or edit application
+   tests, README files, setup instructions, examples, or other documentation on this critical path,
+   except for the single directly relevant compatibility test when the provider-client-hook condition
+   above requires it. Do not run broader tests.
+6. Complete only these focused checks before the gate:
+   - syntax/compile the changed production integration file without importing or executing it;
+   - inspect the narrow diff to confirm fail-closed `/v1/execute` use, no `/v1/proxy/*` or direct-provider
+     fallback, freshness at request time, no credential value, preservation of the required local
+     request/response behavior, and compatibility of the recorded callable parameters and defaults;
+     and
+   - confirm the successful bounded fast scan plus the targeted local call-graph review found no
+     directly relevant alternate provider path. Do not run a second duplicate bypass search.
+
+   Importing or loading an arbitrary application module can execute initialization and is not a
+   pre-gate check. Creating, editing, or requiring a repository protocol-double test is normally
+   deferred. The only pre-gate test exception is the directly relevant compatibility check for an
+   existing provider-client hook described above. Run other narrow tests only after the gate, together
+   with any needed protocol-double and documentation updates. Do not block the first gate on unrelated
+   lint suites or whole-repository tests.
 7. Record only the local-preparation milestone, using the pinned public SHA and repository-relative
    paths, then validate the state file and issue the concise first handoff:
 
@@ -150,8 +226,8 @@ whole-application coverage. Before asking for any account or credential:
    python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json \
      --mark-waiting-for-human --provider PROVIDER --pinned-skill-ref 40_HEX_SHA \
      --application-revision REVISION --changed-path PATH \
-     --focused-check syntax_or_compile --focused-check module_load \
-     --focused-check protocol_double --focused-check adjacent_bypass_search
+     --focused-check syntax_or_compile --focused-check fail_closed_integration_review \
+     --focused-check adjacent_bypass_search
    python3 keel-setup/scripts/setup_state.py --repo-root . \
      --state .keel/setup-state.json --validate-only
    ```
@@ -191,8 +267,9 @@ a one-request non-dispatch advisory dry run; it is not enforcement or reusable a
 
 ## First human gate
 
-When the narrow local preparation and focused checks are complete, stop with only the prepared seam,
-the exact human action, and one evidence limit. Adapt provider and path names, but keep it concise:
+When the narrow local preparation and focused checks are complete, stop with only the following block.
+Render it verbatim, substituting only the helper-established `PATH` and `PROVIDER`; add no preamble,
+summary, report, or follow-up commentary:
 
 > One execution path is prepared for Keel. Nothing is routing through Keel yet.
 > Prepared: `PATH` -> `PROVIDER`.
@@ -269,12 +346,19 @@ protocol double does not make the application path runtime-observed. State D is 
 tested decision seam, not whole-application protection, bypass absence, provider effect, or independent
 verification.
 
+Before exercising that real application path, create or update its narrow protocol-double test when
+the repository needs one and run the focused test. This is post-gate validation of the prepared adapter,
+not live-routing evidence.
+
 ## Post-gate deep assurance
 
 After the human gate is satisfied and the deterministic pair and narrow application path have been
 attempted, perform the deferred assurance work. Run `scripts/inventory.py` without `--fast`, or inspect
 equivalently, across model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
 background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
+
+Update application setup documentation here when the repository needs it. Protocol-double and
+documentation work remain required assurance where relevant; only their ordering moved.
 
 Record every discovered path as `protected`, `governed_routed`, `intentionally_unprotected`, or
 `unresolved` in a report conforming to `reference/coverage.schema.json`. This schema deliberately has

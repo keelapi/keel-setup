@@ -78,6 +78,16 @@ class SchemaTest(unittest.TestCase):
 
     def test_state_f_stage_parses_but_is_not_supported_here(self):
         self.assertEqual(setup_state.validate_state(_valid(stage="state_f_verified")), [])
+
+    def test_legacy_four_check_waiting_state_remains_valid(self):
+        state = _waiting_state(
+            pre_gate_checks={
+                "status": "passed",
+                "checks": list(setup_state.LEGACY_PRE_GATE_CHECKS),
+                "checked_at": "2026-08-28T10:00:00Z",
+            }
+        )
+        self.assertEqual(setup_state.validate_state(state), [])
         self.assertNotIn("state_f_verified", setup_state.STATE_D_STAGES)
 
     def test_waiting_stage_requires_changed_paths_and_passing_focused_checks(self):
@@ -601,8 +611,7 @@ class CommandLineTest(unittest.TestCase):
                         "--pinned-skill-ref", "a" * 40,
                         "--changed-path", "service.py",
                         "--focused-check", "syntax_or_compile",
-                        "--focused-check", "module_load",
-                        "--focused-check", "protocol_double",
+                        "--focused-check", "fail_closed_integration_review",
                         "--focused-check", "adjacent_bypass_search",
                     ]
                 )
