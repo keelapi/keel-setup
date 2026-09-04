@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     key = os.environ.get("KEEL_API_KEY")
     if not key:
         print(
-            "KEEL_API_KEY is not set. Install a client-scoped key outside the model conversation, "
+            "KEEL_API_KEY is not set. Install a Runtime key outside the model conversation, "
             "then rerun.",
             file=sys.stderr,
         )

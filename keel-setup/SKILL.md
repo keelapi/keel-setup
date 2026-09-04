@@ -157,8 +157,9 @@ When the result is `ready_for_human`, review the bounded unified diff carried in
 `diff_truncated` is `false`, do not rerun `git diff`. If it is `true`, run exactly one targeted
 `git diff` over `validation.changed_paths` before the gate. Do not remove this independent narrow-diff
 review. Render the canonical First human gate block verbatim, substituting only the helper-established
-`PATH` and `PROVIDER`, then wait. The helper result is source-inspected local preparation only; it is
-not runtime evidence.
+`PATH`, then wait. The deterministic helper's golden path is OpenAI-only; do not reuse its guided
+dashboard sequence for another provider. The helper result is source-inspected local preparation
+only; it is not runtime evidence.
 
 Any other outcome is a no-guess fallback. `ambiguous`, `unsupported_shape`,
 `model_review_required`, `unsafe_contract_change`, `validation_failed`, and `untrusted_bundle` do not
@@ -267,17 +268,70 @@ a one-request non-dispatch advisory dry run; it is not enforcement or reusable a
 
 ## First human gate
 
-When the narrow local preparation and focused checks are complete, stop with only the following block.
-Render it verbatim, substituting only the helper-established `PATH` and `PROVIDER`; add no preamble,
-summary, report, or follow-up commentary:
+For the deterministic OpenAI golden path, the dashboard handoff is a three-phase conversation. Show
+only the current phase, then wait. Do not combine all dashboard and credential work into one paragraph.
+Human replies establish only the stated dashboard observation as `human-asserted`; they are not runtime
+evidence and do not authorize the agent to perform a dashboard action.
 
-> One execution path is prepared for Keel. Nothing is routing through Keel yet.
-> Prepared: `PATH` -> `PROVIDER`.
-> Your step: open Keel, connect and validate `PROVIDER`, review and activate the Quickstart or template
-> control yourself, and install a client-scoped key as `KEEL_API_KEY` outside this chat. Do not paste
-> the key here. Reply `ready` with the allowed and denied model names Keel shows you.
-> This is local preparation on one path. No live routing, and no check of other paths in this repo, has
+When narrow local preparation and focused checks are complete, stop with only the following block.
+Render it verbatim, substituting only the helper-established `PATH`; add no preamble, summary, report,
+or follow-up commentary:
+
+> I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
+>
+> **Step 1 of 3 — Connect OpenAI**
+>
+> In the Keel dashboard, open **Set up Keel**.
+>
+> Under **Connect OpenAI for the first proof**, click **Connect a provider**. On **Connectors**, click
+> **Add connector**, select **OpenAI**, and click **Next**. Enter a **Display name** and your
+> **API key secret**, click **Review**, then **Save connector**. Click **Test connection**.
+>
+> Do not paste your OpenAI API key here.
+>
+> Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
+>
+> This is local preparation for one call. No live Keel request or check of other application paths has
 > happened yet.
+
+After the human replies `done`, treat connector health only as human-asserted and show only this block:
+
+> **Step 2 of 3 — Turn on your first Keel policy**
+>
+> Return to **Set up Keel**. Read **What this setup applies** in step 1. Then, under **Set up Production Governance**,
+> click **Apply Production Governance**. This saves an inactive policy; it does not turn it on.
+>
+> Under **Your allowed/denied pair**, click **Copy**. Then click **Review and turn it on**. On
+> **Policies**, switch **Production Governance** on and confirm **Turn on**.
+>
+> When its status says **Active**, paste the three copied lines here. They contain only provider and
+> model names, not a credential.
+
+Accept only the dashboard's three-line `provider`, `allowed model`, and `denied model` block at this
+step. Do not accept, request, or inspect a credential. Treat the pair and Active status as
+human-asserted. Then show only this block:
+
+> **Step 3 of 3 — Create your Keel Runtime key**
+>
+> Open **API Keys** in Keel and click **Create Key**. Enter a name such as `Local setup`, leave
+> **Runtime key** selected, and click **Create Key**. Copy the key when Keel shows it; it appears only
+> once.
+>
+> Do not paste the key here. Your app needs it available as `KEEL_API_KEY` outside this conversation.
+>
+> If you already know how to make `KEEL_API_KEY` available to this Codex session, do that and reply
+> `ready`. Otherwise reply `help me install it` and tell me whether you use Codex desktop, Codex CLI,
+> or another terminal/runtime. I will give you environment-specific steps without asking for the key.
+
+If the human asks for installation help, never imply that exporting a variable in an unrelated shell
+changes an already-running Codex process. Explain when the relevant process must be restarted, preserve
+the ignored/untracked secret boundary, and ask only for confirmation of presence afterward. Do not ask
+the human to paste, print, echo, checksum, or otherwise reveal the value.
+
+This exact guided sequence applies only to the currently supported OpenAI first-proof surface. If a
+model-driven fallback prepares another provider, do not relabel it as this OpenAI flow or invent button
+names. State the locally prepared path and provider, explain that the current guided dashboard proof is
+OpenAI-specific, and request explicit direction for bounded provider-specific setup.
 
 When discovery is ambiguous, stop without preparing a guessed path:
 
@@ -375,7 +429,7 @@ status, and every retry generates a fresh timestamp and a new nonce inside the a
 
 | Symptom | Cause established by the response | Retry or fix |
 |---|---|---|
-| Verifier exits 2: `KEEL_API_KEY is not set` | The verifier process cannot see a key. | Ask the human to install a client key outside this conversation. Never ask for the value. |
+| Verifier exits 2: `KEEL_API_KEY is not set` | The verifier process cannot see a key. | Ask the human to install a Runtime key outside this conversation. Never ask for the value. |
 | 401 `unauthorized` | Keel did not authenticate the client key. Absent, malformed, revoked, and expired are intentionally collapsed into one code. | Check presence without printing it. If present, ask the human to inspect or reissue it in the dashboard. |
 | 401 `request_not_fresh` | Timestamp or nonce freshness failed, before policy. No policy claim was made. | Send an integer epoch generated now and a new nonce of at least 16 characters inside the attempt; check clock skew. |
 | 409 `nonce_reuse` | That nonce was already accepted for this client key. | Generate a new nonce for the retry. Refreshing only the timestamp repeats the failure. |
@@ -437,10 +491,12 @@ helper reports what is due in its `due` list.
 
 - **Invocation 2 — resume.** Resume the earliest unmet stage. Re-read the narrow diff and local state,
   and do not create a duplicate project, connector, policy, or key. `waiting_for_human` returns directly
-  to the concise gate without repeating Fast First Run. If the gate is satisfied, run the deterministic
-  pair verifier and narrow application path, then continue the deferred deep assurance work. If it is
-  not satisfied, improve only a focused local check that is useful without the credential and repeat
-  one concise human request.
+  to the guided gate without repeating Fast First Run. The local state does not prove which human phase
+  was completed. Use only human assertions retained in the current conversation; if they are absent,
+  restart at Step 1 instead of inferring dashboard progress. If the gate is satisfied, run the
+  deterministic pair verifier and narrow application path, then continue the deferred deep assurance
+  work. If it is not satisfied, improve only a focused local check that is useful without the credential
+  and repeat one concise human request.
 - **Invocation 5 — drift audit.** Search for new `/v1/proxy/` references, new direct provider clients,
   new MCP tools or schemas, direct-handler and adapter bypasses, background execution, streaming
   additions, a stale model pair, secret-tracking regressions, and call sites still carrying

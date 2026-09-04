@@ -425,18 +425,79 @@ class FastFirstRunTest(unittest.TestCase):
     def test_first_human_gate_is_a_canonical_verbatim_template(self):
         text = SKILL.read_text(encoding="utf-8")
         gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
-        canonical = """> One execution path is prepared for Keel. Nothing is routing through Keel yet.
-> Prepared: `PATH` -> `PROVIDER`.
-> Your step: open Keel, connect and validate `PROVIDER`, review and activate the Quickstart or template
-> control yourself, and install a client-scoped key as `KEEL_API_KEY` outside this chat. Do not paste
-> the key here. Reply `ready` with the allowed and denied model names Keel shows you.
-> This is local preparation on one path. No live routing, and no check of other paths in this repo, has
+        canonical = """> I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
+>
+> **Step 1 of 3 — Connect OpenAI**
+>
+> In the Keel dashboard, open **Set up Keel**.
+>
+> Under **Connect OpenAI for the first proof**, click **Connect a provider**. On **Connectors**, click
+> **Add connector**, select **OpenAI**, and click **Next**. Enter a **Display name** and your
+> **API key secret**, click **Review**, then **Save connector**. Click **Test connection**.
+>
+> Do not paste your OpenAI API key here.
+>
+> Reply `done` when **Connection test result** shows **healthy** and **Live test** shows **Yes**.
+>
+> This is local preparation for one call. No live Keel request or check of other application paths has
 > happened yet."""
 
         self.assertIn("Render it verbatim", gate)
         self.assertIn("substituting only", gate)
         self.assertIn("add no preamble", gate)
         self.assertIn(canonical, gate)
+
+    def test_guided_handoff_uses_current_dashboard_terms_one_phase_at_a_time(self):
+        text = SKILL.read_text(encoding="utf-8")
+        gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
+
+        for required in (
+            "**Step 1 of 3 — Connect OpenAI**",
+            "**Add connector**, select **OpenAI**, and click **Next**",
+            "**Display name**",
+            "**API key secret**",
+            "**Connection test result** shows **healthy**",
+            "**Live test** shows **Yes**",
+            "**Step 2 of 3 — Turn on your first Keel policy**",
+            "Read **What this setup applies** in step 1",
+            "under **Set up Production Governance**",
+            "**Apply Production Governance**",
+            "**Review and turn it on**",
+            "status says **Active**",
+            "**Step 3 of 3 — Create your Keel Runtime key**",
+            "**Runtime key** selected",
+            "make `KEEL_API_KEY` available to this Codex session",
+            "`help me install it`",
+        ):
+            self.assertIn(required, gate)
+
+        first = gate.index("**Step 1 of 3")
+        second = gate.index("**Step 2 of 3")
+        third = gate.index("**Step 3 of 3")
+        self.assertLess(first, second)
+        self.assertLess(second, third)
+        self.assertIn("After the human replies `done`", gate[first:second])
+        self.assertIn("Then show only this block", gate[second:third])
+        self.assertNotIn("Quickstart or template", gate)
+        self.assertNotIn("client-scoped key", gate)
+        self.assertIn("applies only to the currently supported OpenAI", gate)
+
+    def test_runtime_key_help_does_not_overpromise_process_environment(self):
+        text = SKILL.read_text(encoding="utf-8")
+        gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
+
+        self.assertIn("never imply that exporting a variable in an unrelated shell", gate)
+        self.assertIn("already-running Codex process", gate)
+        self.assertIn("when the relevant process must be restarted", gate)
+        self.assertIn("confirmation of presence", gate)
+
+    def test_resume_never_infers_dashboard_progress_from_local_state(self):
+        text = SKILL.read_text(encoding="utf-8")
+        resume = text[text.index("- **Invocation 2 — resume.**") : text.index("- **Invocation 5")]
+
+        self.assertIn("local state does not prove which human phase", resume)
+        self.assertIn("Use only human assertions retained in the current conversation", resume)
+        self.assertIn("restart at Step 1 instead of inferring dashboard progress", resume)
 
     def test_first_handoff_is_bounded_and_deep_report_is_retained(self):
         text = SKILL.read_text(encoding="utf-8")
@@ -447,9 +508,9 @@ class FastFirstRunTest(unittest.TestCase):
             text.index("## Coverage handoff") : text.index("## Return loop")
         ]
 
-        self.assertIn("Nothing is routing through Keel yet", first_handoff)
-        self.assertIn("No live routing", first_handoff)
-        self.assertIn("no check of other paths in this repo", first_handoff)
+        self.assertIn("Nothing is using Keel yet", first_handoff)
+        self.assertIn("No live Keel request", first_handoff)
+        self.assertIn("check of other application paths", first_handoff)
         self.assertIn("Do not paste", first_handoff)
         self.assertIn("the key here", first_handoff)
         self.assertNotIn("every discovered execution path", first_handoff)

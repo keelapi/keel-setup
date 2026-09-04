@@ -225,6 +225,8 @@ class ProtocolDoubleTest(unittest.TestCase):
         result = subprocess.run([sys.executable, str(SCRIPT), "--provider", "test", "--allow-model", "a", "--deny-model", "b"], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn("not set", result.stderr)
+        self.assertIn("Runtime key", result.stderr)
+        self.assertNotIn("client-scoped", result.stderr)
 
     def test_cli_has_no_credential_argument(self):
         result = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
