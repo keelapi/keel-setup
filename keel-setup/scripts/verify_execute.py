@@ -145,7 +145,15 @@ def _verify_pinned_release(bundle_sha: str) -> None:
         if spec is None or spec.loader is None:
             raise RuntimeError("pinned release verifier is unavailable")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        previous_module = sys.modules.get(spec.name)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if previous_module is None:
+                sys.modules.pop(spec.name, None)
+            else:
+                sys.modules[spec.name] = previous_module
         module.verify_release(bundle, bundle_sha)
     except Exception as exc:
         raise RuntimeError("pinned release verification failed") from exc

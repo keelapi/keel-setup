@@ -8,6 +8,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -537,6 +538,27 @@ class ProtocolDoubleTest(unittest.TestCase):
         self.assertEqual(code, 2)
         prompt.assert_not_called()
         self.assertEqual(err.getvalue(), "pinned release verification failed\n")
+
+    def test_release_verifier_loads_a_dataclass_helper_before_prompt(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle = pathlib.Path(temp_dir)
+            scripts = bundle / "keel-setup" / "scripts"
+            scripts.mkdir(parents=True)
+            helper = scripts / "fast_first_run.py"
+            helper.write_text(
+                "from __future__ import annotations\n"
+                "from dataclasses import dataclass\n"
+                "@dataclass(frozen=True)\n"
+                "class Marker:\n"
+                "    value: str\n"
+                "def verify_release(bundle, expected_sha):\n"
+                "    assert bundle == __import__('pathlib').Path(__file__).resolve().parents[2]\n"
+                "    assert expected_sha == 'a' * 40\n",
+                encoding="utf-8",
+            )
+            synthetic_script = scripts / "verify_execute.py"
+            with mock.patch.object(verify_execute, "__file__", str(synthetic_script)):
+                verify_execute._verify_pinned_release("a" * 40)
 
     def test_base_url_accepts_only_production_origin_or_explicit_loopback_port(self):
         accepted = [
