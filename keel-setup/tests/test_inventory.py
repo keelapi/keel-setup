@@ -475,10 +475,13 @@ happened yet."""
             "**Apply Production Governance**",
             "**Review and turn it on**",
             "status says **Active**",
+            "reply `done`",
             "**Step 3 of 3 — Create your Keel Runtime key**",
             "**Runtime key** selected",
-            "make `KEEL_API_KEY` available to this Codex session",
-            "`help me install it`",
+            "Do not paste the key into Codex, Claude, Cursor, or another chat",
+            "--hidden-input --bundle-sha 40_HEX_SHA",
+            "**Allowed request: PASS** and **Blocked request: PASS**",
+            "It does not install the key into your app",
         ):
             self.assertIn(required, gate)
 
@@ -491,16 +494,37 @@ happened yet."""
         self.assertIn("Then show only this block", gate[second:third])
         self.assertNotIn("Quickstart or template", gate)
         self.assertNotIn("client-scoped key", gate)
+        self.assertNotIn("Your allowed/denied pair", gate)
+        self.assertNotIn("--allow-model", gate)
+        self.assertNotIn("--deny-model", gate)
+        self.assertNotIn("paste the three copied lines", gate)
         self.assertIn("applies only to the currently supported OpenAI", gate)
 
-    def test_runtime_key_help_does_not_overpromise_process_environment(self):
+    def test_runtime_key_custody_uses_release_verified_hidden_input(self):
         text = SKILL.read_text(encoding="utf-8")
         gate = text[text.index("## First human gate") : text.index("### Client-key custody")]
 
-        self.assertIn("never imply that exporting a variable in an unrelated shell", gate)
-        self.assertIn("already-running Codex process", gate)
-        self.assertIn("when the relevant process must be restarted", gate)
-        self.assertIn("confirmation of presence", gate)
+        self.assertIn("verifies the immutable Keel release before it asks for the key", gate)
+        self.assertIn("It will not appear on screen or in shell history", gate)
+        self.assertIn("terminal cannot hide the input", gate)
+        self.assertNotIn("export KEEL_API_KEY", gate)
+        self.assertNotIn("--api-key", gate)
+
+    def test_hidden_verifier_uses_project_bound_profile_without_human_pair_transport(self):
+        text = SKILL.read_text(encoding="utf-8")
+        verification = text[
+            text.index("## Deterministic state-D verification") : text.index(
+                "## Post-gate deep assurance"
+            )
+        ]
+
+        self.assertIn("GET /v1/verification-profile", verification)
+        self.assertIn("project derives only from\nthat key", verification)
+        self.assertIn("requires the same\nprofile digest", verification)
+        self.assertIn("configuration evidence, not runtime proof", verification)
+        self.assertNotIn("human-reported provider/model pair", verification)
+        self.assertNotIn("--allow-model", verification)
+        self.assertNotIn("--deny-model", verification)
 
     def test_resume_never_infers_dashboard_progress_from_local_state(self):
         text = SKILL.read_text(encoding="utf-8")
@@ -523,7 +547,7 @@ happened yet."""
         self.assertIn("No live Keel request", first_handoff)
         self.assertIn("check of other application paths", first_handoff)
         self.assertIn("Do not paste", first_handoff)
-        self.assertIn("the key here", first_handoff)
+        self.assertIn("the key into Codex, Claude, Cursor, or another chat", first_handoff)
         self.assertNotIn("every discovered execution path", first_handoff)
         self.assertIn("every discovered execution path", final_handoff)
         self.assertIn("machine-readable `does_not_establish`", final_handoff)

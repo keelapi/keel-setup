@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Verify one deterministic /v1/execute allow/deny pair.
 
-Standard library only. The execution key is read exclusively from KEEL_API_KEY
-and is never included in output or accepted as an argument.
+Standard library only. The execution key is read either from ``KEEL_API_KEY``
+or, in explicit interactive mode, from a no-echo terminal prompt. It is never
+included in output or accepted as an argument.
 """
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
+import getpass
+import importlib.util
 import json
 import os
+import pathlib
 import re
 import secrets
 import sys
@@ -17,6 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import warnings
 from typing import Any
 
 DEFAULT_BASE_URL = "https://api.keelapi.com"
@@ -44,6 +50,22 @@ _SAFE_ERROR_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_.-]{0,127}")
 _BODY_STATUSES = frozenset({"completed", "denied", "failed"})
 _GOVERNANCE_DECISIONS = frozenset({"allow", "deny"})
 _ERROR_STAGES = frozenset({"permit", "dispatch"})
+_SECRET_ARGUMENT_WORDS = frozenset({"key", "token", "secret", "credential", "password"})
+_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
+_MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+_PROFILE_FIELDS = frozenset(
+    {
+        "schema_version",
+        "provider",
+        "allowed_model",
+        "denied_model",
+        "policy",
+        "effective_policy_set_digest",
+        "profile_digest",
+        "generated_at",
+    }
+)
+_PROFILE_POLICY_FIELDS = frozenset({"id", "version", "content_digest"})
 
 
 def _nonempty(value: str) -> str:
@@ -89,11 +111,175 @@ def _open(request: urllib.request.Request, timeout: float):
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--provider", required=True, type=_nonempty)
-    parser.add_argument("--allow-model", required=True, type=_nonempty)
-    parser.add_argument("--deny-model", required=True, type=_nonempty)
+    parser.add_argument("--provider", type=_nonempty)
+    parser.add_argument("--allow-model", type=_nonempty)
+    parser.add_argument("--deny-model", type=_nonempty)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, type=_base_url)
+    parser.add_argument(
+        "--hidden-input",
+        action="store_true",
+        help="prompt for the Runtime key without echo after verifying the pinned bundle",
+    )
+    parser.add_argument(
+        "--bundle-sha",
+        help="exact 40-character public bundle SHA; required with --hidden-input",
+    )
     return parser.parse_args(argv)
+
+
+def _contains_secret_argument(argv: list[str]) -> bool:
+    for item in argv:
+        option = item.split("=", 1)[0].lower()
+        if option.startswith("--") and any(word in option for word in _SECRET_ARGUMENT_WORDS):
+            return True
+    return False
+
+
+def _verify_pinned_release(bundle_sha: str) -> None:
+    """Run the existing public release verifier before accepting a credential."""
+
+    try:
+        bundle = pathlib.Path(__file__).resolve().parents[2]
+        helper_path = bundle / "keel-setup" / "scripts" / "fast_first_run.py"
+        spec = importlib.util.spec_from_file_location("keel_release_verifier", helper_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("pinned release verifier is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.verify_release(bundle, bundle_sha)
+    except Exception as exc:
+        raise RuntimeError("pinned release verification failed") from exc
+
+
+def _read_hidden_runtime_key() -> str:
+    """Read one Runtime key from an interactive terminal without visible fallback."""
+
+    if not sys.stdin.isatty():
+        raise RuntimeError("interactive Runtime-key entry requires a TTY")
+    try:
+        with warnings.catch_warnings():
+            # getpass warns immediately before its visible-input fallback. Converting that
+            # warning to an exception prevents the fallback from reading any credential.
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            key = getpass.getpass("Keel Runtime key: ", stream=sys.stderr)
+    except getpass.GetPassWarning as exc:
+        raise RuntimeError("terminal echo could not be disabled") from exc
+    except (EOFError, OSError) as exc:
+        raise RuntimeError("Runtime key could not be read securely from this terminal") from exc
+    if not key:
+        raise RuntimeError("Runtime key was not entered")
+    return key
+
+
+class VerificationProfileError(RuntimeError):
+    """A bounded failure to obtain or validate non-secret proof configuration."""
+
+
+def _fresh_headers(key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {key}",
+        "X-Keel-Timestamp": str(int(time.time())),
+        "X-Keel-Nonce": secrets.token_urlsafe(18),
+        "Cache-Control": "no-store",
+    }
+
+
+def _parse_verification_profile(raw: bytes) -> dict[str, Any]:
+    try:
+        profile = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VerificationProfileError("verification profile response was malformed") from exc
+    if not isinstance(profile, dict) or set(profile) != _PROFILE_FIELDS:
+        raise VerificationProfileError("verification profile response had an unexpected shape")
+    if profile.get("schema_version") != 1 or profile.get("provider") != "openai":
+        raise VerificationProfileError("verification profile response was unsupported")
+
+    allowed_model = profile.get("allowed_model")
+    denied_model = profile.get("denied_model")
+    if (
+        not isinstance(allowed_model, str)
+        or _MODEL_PATTERN.fullmatch(allowed_model) is None
+        or not isinstance(denied_model, str)
+        or _MODEL_PATTERN.fullmatch(denied_model) is None
+        or allowed_model == denied_model
+    ):
+        raise VerificationProfileError("verification profile model pair was invalid")
+
+    policy = profile.get("policy")
+    if not isinstance(policy, dict) or set(policy) != _PROFILE_POLICY_FIELDS:
+        raise VerificationProfileError("verification profile policy binding was invalid")
+    try:
+        policy_id = uuid.UUID(policy.get("id"))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise VerificationProfileError("verification profile policy binding was invalid") from exc
+    if str(policy_id) != policy.get("id"):
+        raise VerificationProfileError("verification profile policy binding was invalid")
+    if not isinstance(policy.get("version"), int) or policy["version"] < 1:
+        raise VerificationProfileError("verification profile policy binding was invalid")
+    for digest in (
+        policy.get("content_digest"),
+        profile.get("effective_policy_set_digest"),
+        profile.get("profile_digest"),
+    ):
+        if not isinstance(digest, str) or _DIGEST_PATTERN.fullmatch(digest) is None:
+            raise VerificationProfileError("verification profile digest was invalid")
+    generated_at = profile.get("generated_at")
+    if not isinstance(generated_at, str) or len(generated_at) > 64:
+        raise VerificationProfileError("verification profile timestamp was invalid")
+    try:
+        parsed_time = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise VerificationProfileError("verification profile timestamp was invalid") from exc
+    if parsed_time.tzinfo is None:
+        raise VerificationProfileError("verification profile timestamp was invalid")
+    return profile
+
+
+def fetch_verification_profile(
+    *, base_url: str, key: str, timeout: float = 10.0
+) -> dict[str, Any]:
+    request = urllib.request.Request(
+        f"{base_url}/v1/verification-profile",
+        method="GET",
+        headers=_fresh_headers(key),
+    )
+    try:
+        with _open(request, timeout=timeout) as response:
+            http_status = response.status
+            raw = _read_bounded(response)
+    except urllib.error.HTTPError as exc:
+        code = None
+        raw = _read_bounded(exc)
+        if raw:
+            try:
+                decoded = json.loads(raw)
+                error = decoded.get("error") if isinstance(decoded, dict) else None
+                code = _safe_error_code(error.get("code")) if isinstance(error, dict) else None
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                pass
+        suffix = f": {code}" if code else ""
+        raise VerificationProfileError(
+            f"verification profile unavailable (HTTP {exc.code}{suffix})"
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise VerificationProfileError("verification profile transport failed") from exc
+    if http_status != 200 or not raw:
+        raise VerificationProfileError("verification profile response was malformed")
+    return _parse_verification_profile(raw)
+
+
+def _profile_binding(profile: dict[str, Any]) -> tuple[Any, ...]:
+    policy = profile["policy"]
+    return (
+        profile["profile_digest"],
+        profile["provider"],
+        profile["allowed_model"],
+        profile["denied_model"],
+        policy["id"],
+        policy["version"],
+        policy["content_digest"],
+        profile["effective_policy_set_digest"],
+    )
 
 
 def classify(http_status: int | None, body: dict[str, Any] | None) -> dict[str, Any]:
@@ -249,41 +435,116 @@ def redact_record(record: dict[str, Any], secret: str) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    try:
-        args = parse_args(argv)
-    except SystemExit as exc:
-        return int(exc.code)
-    key = os.environ.get("KEEL_API_KEY")
-    if not key:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if _contains_secret_argument(raw_argv):
         print(
-            "KEEL_API_KEY is not set. Install a Runtime key outside the model conversation, "
-            "then rerun.",
+            "Runtime keys are never accepted in command-line arguments; use --hidden-input.",
             file=sys.stderr,
         )
         return 2
+    try:
+        args = parse_args(raw_argv)
+    except SystemExit as exc:
+        return int(exc.code)
+    key: str | None = None
+    try:
+        if args.hidden_input:
+            if args.provider or args.allow_model or args.deny_model:
+                print(
+                    "Hidden-input verification obtains its model pair from Keel; "
+                    "do not pass provider or model selectors.",
+                    file=sys.stderr,
+                )
+                return 2
+            if not args.bundle_sha:
+                print("--bundle-sha is required with --hidden-input.", file=sys.stderr)
+                return 2
+            try:
+                _verify_pinned_release(args.bundle_sha)
+            except RuntimeError as exc:
+                print(str(exc), file=sys.stderr)
+                return 2
+            print("Pinned Keel setup release verified.", file=sys.stderr)
+            try:
+                key = _read_hidden_runtime_key()
+            except (RuntimeError, KeyboardInterrupt) as exc:
+                message = str(exc) if str(exc) else "Runtime-key entry was cancelled"
+                print(message, file=sys.stderr)
+                return 2
+            try:
+                initial_profile = fetch_verification_profile(
+                    base_url=args.base_url,
+                    key=key,
+                )
+            except VerificationProfileError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+        else:
+            if not (args.provider and args.allow_model and args.deny_model):
+                print(
+                    "--provider, --allow-model, and --deny-model are required in environment mode.",
+                    file=sys.stderr,
+                )
+                return 2
+            key = os.environ.get("KEEL_API_KEY")
+            if not key:
+                print(
+                    "KEEL_API_KEY is not set. Install a Runtime key outside the model conversation, "
+                    "then rerun.",
+                    file=sys.stderr,
+                )
+                return 2
 
-    results = [
-        execute_attempt(
-            base_url=args.base_url,
-            key=key,
-            provider=args.provider,
-            model=args.allow_model,
-            expectation="allow",
-        ),
-        execute_attempt(
-            base_url=args.base_url,
-            key=key,
-            provider=args.provider,
-            model=args.deny_model,
-            expectation="deny",
-        ),
-    ]
-    safe_results = [redact_record(result, key) for result in results]
-    for safe_result in safe_results:
-        print(json.dumps(safe_result, sort_keys=True, separators=(",", ":")))
-    if [item["classification"] for item in results] == ["allowed_completed", "keel_denied"]:
-        return 0
-    return 1
+            initial_profile = {
+                "provider": args.provider,
+                "allowed_model": args.allow_model,
+                "denied_model": args.deny_model,
+            }
+
+        results = [
+            execute_attempt(
+                base_url=args.base_url,
+                key=key,
+                provider=initial_profile["provider"],
+                model=initial_profile["allowed_model"],
+                expectation="allow",
+            ),
+            execute_attempt(
+                base_url=args.base_url,
+                key=key,
+                provider=initial_profile["provider"],
+                model=initial_profile["denied_model"],
+                expectation="deny",
+            ),
+        ]
+        safe_results = [redact_record(result, key) for result in results]
+        for safe_result in safe_results:
+            print(json.dumps(safe_result, sort_keys=True, separators=(",", ":")))
+        if args.hidden_input:
+            try:
+                final_profile = fetch_verification_profile(
+                    base_url=args.base_url,
+                    key=key,
+                )
+            except VerificationProfileError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if _profile_binding(final_profile) != _profile_binding(initial_profile):
+                print("Verification profile changed during proof; result invalid.", file=sys.stderr)
+                return 1
+        passed = [item["classification"] for item in results] == ["allowed_completed", "keel_denied"]
+        if args.hidden_input:
+            if passed:
+                print("Allowed request: PASS")
+                print("Blocked request: PASS")
+            else:
+                print("Allowed request: FAIL")
+                print("Blocked request: FAIL")
+        return 0 if passed else 1
+    finally:
+        # Python strings cannot be reliably zeroized. Drop our reference promptly and make no
+        # stronger memory-erasure claim; the process exits immediately after this function.
+        key = None
 
 
 if __name__ == "__main__":

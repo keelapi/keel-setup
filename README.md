@@ -19,13 +19,15 @@ use `curl | sh` or reconstruct a missing release from memory.
 
 The copied setup prompt and this repository contain no Keel credential or customer identifier. A
 coding agent must never ask a human to paste a credential into a conversation. When runtime
-verification is reached, the human creates a client-scoped key in the Keel dashboard and installs it
-as `KEEL_API_KEY` outside the transcript. An environment variable is transcript hygiene, not process
-isolation.
+verification is reached, the human creates a Runtime key in the Keel dashboard and enters it only at
+the release-pinned verifier's password-style prompt in a terminal they control. The key is never a
+command-line argument, never appears in shell history, and is not installed into the application by
+the verification step. The clipboard remains an exposure surface.
 
-Only `keel-setup/scripts/verify_execute.py` performs network I/O. It makes the two bounded verification
-requests described by the setup skill, only after the human-owned key is installed. The remaining
-helpers are local, read-only analysis or schema validation.
+Only `keel-setup/scripts/verify_execute.py` performs network I/O. In hidden-input mode it verifies this
+release before prompting, obtains a project-bound read-only verification profile, makes the two bounded
+verification requests described by the setup skill, and confirms the profile did not change during the
+proof. The remaining helpers are local, read-only analysis or schema validation.
 
 ## Provenance
 

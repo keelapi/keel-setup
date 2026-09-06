@@ -1,6 +1,6 @@
 ---
 name: keel-setup
-description: Inspect, prepare, and verify the deterministic Keel state-D integration for an application. Use for first-run setup, source inventory, coverage review, or returning to an incomplete setup. Performs zero-credential preparation, then uses a human-installed client key only for bounded POST /v1/execute verification. Never grants or changes authority.
+description: Inspect, prepare, and verify the deterministic Keel state-D integration for an application. Use for first-run setup, source inventory, coverage review, or returning to an incomplete setup. Performs zero-credential preparation, then uses a human-created Runtime key only inside the local hidden-input verifier for bounded POST /v1/execute verification. Never grants or changes authority.
 ---
 
 # Setting up Keel
@@ -308,16 +308,12 @@ Return to **Set up Keel**.
 Read **What this setup applies** in step 1. Then, under **Set up Production Governance**, click
 **Apply Production Governance**. This saves an inactive policy; it does not turn it on.
 
-Under **Your allowed/denied pair**, click **Copy**. Then click **Review and turn it on**.
+Click **Review and turn it on**.
 
 On **Policies**, switch **Production Governance** on and confirm **Turn on**.
 
-When its status says **Active**, paste the three copied lines here. They contain only provider and
-model names, not a credential.
-
-Accept only the dashboard's three-line `provider`, `allowed model`, and `denied model` block at this
-step. Do not accept, request, or inspect a credential. Treat the pair and Active status as
-human-asserted. Then show only this block:
+When its status says **Active**, reply `done`. Treat Active status only as human-asserted. Do not
+accept, request, or inspect a credential. Then show only this block:
 
 **Step 3 of 3 — Create your Keel Runtime key**
 
@@ -327,16 +323,25 @@ Enter a name such as `Local setup`, leave **Runtime key** selected, and click **
 
 When Keel shows the key, copy it; it appears only once.
 
-Do not paste the key here. Your app needs it available as `KEEL_API_KEY` outside this conversation.
+Do not paste the key into Codex, Claude, Cursor, or another chat. In a terminal you control, run the
+release-pinned verification commands below after replacing `40_HEX_SHA` with the exact bundle SHA
+already established in this setup:
 
-If you already know how to make `KEEL_API_KEY` available to this Codex session, do that and reply
-`ready`. Otherwise reply `help me install it` and tell me whether you use Codex desktop, Codex CLI,
-or another terminal/runtime. I will give you environment-specific steps without asking for the key.
+```text
+BUNDLE="$(mktemp -d)/keel-setup"
+git clone -q https://github.com/keelapi/keel-setup.git "$BUNDLE" &&
+git -C "$BUNDLE" checkout -q --detach 40_HEX_SHA &&
+python3 "$BUNDLE/keel-setup/scripts/verify_execute.py" --hidden-input --bundle-sha 40_HEX_SHA
+```
 
-If the human asks for installation help, never imply that exporting a variable in an unrelated shell
-changes an already-running Codex process. Explain when the relevant process must be restarted, preserve
-the ignored/untracked secret boundary, and ask only for confirmation of presence afterward. Do not ask
-the human to paste, print, echo, checksum, or otherwise reveal the value.
+The command verifies the immutable Keel release before it asks for the key. At **Keel Runtime key:**,
+enter the copied value and press Enter. It will not appear on screen or in shell history. The verifier
+holds it only for that process, obtains the non-secret proof configuration for the key's project, and
+prints bounded non-secret results. It does not install the key into your app.
+
+When it shows **Allowed request: PASS** and **Blocked request: PASS**, paste only the two JSON result
+lines here; they contain classifications and safe correlation identifiers, not the Runtime key. If the
+terminal cannot hide the input, the verifier stops instead of accepting visible input.
 
 This exact guided sequence applies only to the currently supported OpenAI first-proof surface. If a
 model-driven fallback prepares another provider, do not relabel it as this OpenAI flow or invent button
@@ -368,37 +373,48 @@ Three rules, and the third is a disclosure the human is owed rather than a reass
    never read it back. If a key reaches the conversation anyway, say so plainly, treat it as disclosed,
    and ask the human to revoke and reissue it in the dashboard. Continuing quietly is the worse
    outcome.
-2. **The key is configured outside the agent conversation.** The human originates the grant and
-   chooses its custody: Keel's release-pinned local credential helper where it is shipped, otherwise
-   the repository's untracked secret mechanism. Never mint, exchange, or install it on their behalf.
-3. **An environment variable is transcript hygiene, not process isolation.** It keeps the value out of
-   the transcript. It does not isolate the value from the coding-agent process, which can read the
-   environment it runs in. Until a local credential broker can attach the key without exposing it to
-   that process, say this rather than implying the value is contained.
+2. **The key is entered only into the release-pinned local verifier.** The human originates the grant,
+   copies it from the one-time dashboard view, and pastes it into a password-style prompt in a terminal
+   they control. The verifier must refuse non-interactive input and any inability to disable echo. The
+   clipboard remains an exposure surface; hidden terminal input eliminates screen and shell-history
+   exposure, not every possible exposure. Never mint, exchange, or install it on their behalf.
+3. **Verification does not install the application credential.** The hidden-input process holds the key
+   only long enough for the bounded proof. If the application later needs `KEEL_API_KEY`, its custody is
+   a separate human-owned deployment step.
+   An environment variable is transcript hygiene, not process isolation; an unrelated shell cannot
+   change an already-running agent process.
 
 The client key is an execution credential only. It is not a policy, mapping, connector, project, or
 key-issuance credential, and that boundary is server-enforced rather than a naming convention.
 
 ## Deterministic state-D verification
 
-After the human says `ready`, check only whether `KEEL_API_KEY` is present. Never print, repeat, measure,
-checksum, persist, or copy it. Use the human-reported provider/model pair; do not choose a more
-convenient pair or infer it from a registry.
+Give the human the release-pinned three-command workflow in Step 3. The coding agent must not ask for,
+receive, or inspect the Runtime key and must not move it into its own environment. In hidden-input mode,
+the Runtime key authenticates a read-only `GET /v1/verification-profile`; the project derives only from
+that key, and no caller-supplied project, policy, provider, or model selector is accepted. The returned
+profile is configuration evidence, not runtime proof.
 
-Run:
+The final command is:
 
 ```text
-python3 keel-setup/scripts/verify_execute.py --provider PROVIDER --allow-model ALLOWED --deny-model DENIED
+python3 BUNDLE/keel-setup/scripts/verify_execute.py --hidden-input --bundle-sha 40_HEX_SHA
 ```
 
 Retain the script's non-secret `request_id` and `permit_id` values for exact dashboard and Permit
 matching. If either is null, report that exact correlation is unavailable; never infer it from a
 nearby model name or timestamp.
 
-The helper reads the key only from its environment. It generates an integer timestamp and a distinct
-nonce inside each request attempt, sends `input.messages`, and prints only bounded classification
-fields. Exit `0` means `allowed_completed` followed by `keel_denied`; exit `1` means requests completed
-without the expected pair; exit `2` means a local precondition failed.
+In interactive mode, the helper verifies the exact public bundle identity, allowlist, provenance,
+product digest, and checksums before opening the no-echo TTY prompt. It fetches the authoritative
+verification profile, generates an integer timestamp and a distinct nonce inside each request, sends
+`input.messages`, performs the allow and deny requests, then refetches the profile and requires the same
+profile digest before reporting success. It prints only bounded classification fields. Exit `0` means
+`allowed_completed` followed by `keel_denied` against one stable profile; exit `1` means profile
+retrieval, profile stability, or the expected request pair failed; exit `2` means release verification,
+secure input, or another local precondition failed. The existing environment mode remains available for
+previously configured applications with explicit provider/model arguments, but it is not the beginner
+custody workflow.
 
 Never infer denial from HTTP 403 alone:
 
@@ -418,7 +434,7 @@ not live-routing evidence.
 
 ## Post-gate deep assurance
 
-After the human gate is satisfied and the deterministic pair and narrow application path have been
+After the human gate is satisfied and the stable verification pair and narrow application path have been
 attempted, perform the deferred assurance work. Run `scripts/inventory.py` without `--fast`, or inspect
 equivalently, across model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
 background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
@@ -441,15 +457,18 @@ status, and every retry generates a fresh timestamp and a new nonce inside the a
 
 | Symptom | Cause established by the response | Retry or fix |
 |---|---|---|
-| Verifier exits 2: `KEEL_API_KEY is not set` | The verifier process cannot see a key. | Ask the human to install a Runtime key outside this conversation. Never ask for the value. |
+| Verifier exits 2 before the hidden prompt | Release verification, TTY input, or terminal echo protection failed. | Report the bounded precondition error. Never request the key through an argument, pipe, prompt, or chat workaround. |
+| Verifier exits 2: `KEEL_API_KEY is not set` | The legacy environment-mode verifier process cannot see a key. | Ask the human to use the hidden-input workflow or configure the established application environment outside this conversation. Never ask for the value. |
+| Verifier exits 1 before `/v1/execute` with `verification_profile_*` | Keel could not derive one current authoritative pair from active Production Governance and the effective policy set. | Report the exact bounded profile code. Ask the human to inspect Production Governance when the code says inactive, archived, pending, or ambiguous. Do not supply a model pair manually. |
+| Verifier exits 1: `Verification profile changed during proof` | The active policy identity, content, version, effective policy set, or selected pair changed between the two profile reads. | Treat both request results as invalid for this proof. Wait for policy changes to settle, then rerun the whole bounded verifier. |
 | 401 `unauthorized` | Keel did not authenticate the client key. Absent, malformed, revoked, and expired are intentionally collapsed into one code. | Check presence without printing it. If present, ask the human to inspect or reissue it in the dashboard. |
 | 401 `request_not_fresh` | Timestamp or nonce freshness failed, before policy. No policy claim was made. | Send an integer epoch generated now and a new nonce of at least 16 characters inside the attempt; check clock skew. |
 | 409 `nonce_reuse` | That nonce was already accepted for this client key. | Generate a new nonce for the retry. Refreshing only the timestamp repeats the failure. |
 | 400 `invalid_request`, field `input` | The required unified `input` is missing. | Restore `input.messages`. |
 | 500 `provider_request_invalid`, stage `dispatch`, decision `allow` | Keel allowed; provider request construction failed. `input.text` produces this. | Send provider-native `input.messages`. This is not a denial and must never be reported as one. |
-| 400 `provider_required` | The model is ambiguous across providers. | Send the explicit provider the human reported. |
-| 400 unknown model, or `unsupported_operation` | The reported pair or operation is not registered for this surface, so the intended policy proof did not occur. | Stop on a stale pair and report a Keel release defect. Do not substitute a more convenient model. |
-| `pricing_not_configured` | Required route pricing is absent. | Confirm the reported pair; if it is correct, report a Keel registry or pricing defect. Do not edit policy. |
+| 400 `provider_required` | The verification profile did not resolve the model to one provider. | Report a Keel verification-profile defect. Do not ask the human to choose a provider. |
+| 400 unknown model, or `unsupported_operation` | The authoritative profile is stale or unsupported for this execution surface, so the intended policy proof did not occur. | Report a Keel release or profile defect. Do not substitute a more convenient model. |
+| `pricing_not_configured` | Required route pricing is absent. | Report a Keel registry or pricing defect. Do not edit policy or substitute another profile model. |
 | 403 + `denied` + stage `permit` + decision `deny` | Keel denied before provider dispatch. | Expected for the denied model. If it happened to the allowed model, ask the human to inspect the active control. |
 | Any HTTP + `failed` + stage `dispatch` + decision `allow` | Keel allowed; the provider or dispatch failed. Its HTTP status can also be 403. | Diagnose provider credential, model access, quota, endpoint, or connector. Never report this as Keel blocking the call. |
 | 503 `provider_outbound_blocked`, stage `dispatch`, decision `allow` | Outbound dispatch was blocked; a missing connector credential produces this. | Ask the human to inspect the intended direct connector, its enabled state, and its credential. |
@@ -460,7 +479,7 @@ status, and every retry generates a fresh timestamp and a new nonce inside the a
 Retry only the freshness-shaped and transport-shaped failures — `request_not_fresh`, `nonce_reuse`,
 and a transport failure — and only with a newly generated timestamp and nonce. Bound retries and stop
 after the second consecutive failure of the same classification. Everything else in the table is a diagnosis to report,
-not a condition to retry into. A retry never changes the requested provider or model pair, never
+not a condition to retry into. A retry never changes the verification profile's provider or model pair, never
 substitutes a different control, and never re-runs a step the human owns.
 
 When more than one cause maps to the same public error, say what is known and list the checks rather
@@ -506,12 +525,12 @@ helper reports what is due in its `due` list.
   to the guided gate without repeating Fast First Run. The local state does not prove which human phase
   was completed. Use only human assertions retained in the current conversation; if they are absent,
   restart at Step 1 instead of inferring dashboard progress. If the gate is satisfied, run the
-  deterministic pair verifier and narrow application path, then continue the deferred deep assurance
+  deterministic profile verifier and narrow application path, then continue the deferred deep assurance
   work. If it is not satisfied, improve only a focused local check that is useful without the credential
   and repeat one concise human request.
 - **Invocation 5 — drift audit.** Search for new `/v1/proxy/` references, new direct provider clients,
   new MCP tools or schemas, direct-handler and adapter bypasses, background execution, streaming
-  additions, a stale model pair, secret-tracking regressions, and call sites still carrying
+  additions, a stale verification profile, secret-tracking regressions, and call sites still carrying
   `source_inspected` or `unresolved`. Re-run the state-D pair where it is safe. Recommend the exact
   human action where drift needs one; never rotate a credential or change a control.
 - **Invocation 20 — maintenance.** Treat setup as maintenance, not onboarding. Re-pin and re-read the
