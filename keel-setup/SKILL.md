@@ -414,8 +414,9 @@ python3 BUNDLE/keel-setup/scripts/verify_execute.py --hidden-input --bundle-sha 
 ```
 
 Retain the script's non-secret `request_id` and `permit_id` values for exact dashboard and Permit
-matching. If either is null, report that exact correlation is unavailable; never infer it from a
-nearby model name or timestamp.
+matching, and surface them in `verification details` rather than in the default success response. If
+either is null, say there that exact correlation is unavailable; never infer it from a nearby model
+name or timestamp.
 
 In interactive mode, the helper verifies the exact public bundle identity, allowlist, provenance,
 product digest, and checksums before opening the no-echo TTY prompt. It fetches the authoritative
@@ -435,21 +436,110 @@ Never infer denial from HTTP 403 alone:
   `governance.decision=allow`; its HTTP status can also be 403.
 - Freshness or authentication errors make no policy claim.
 
-After the protocol helper passes, initial project/policy onboarding is complete. Show:
+After the protocol helper passes, initial project/policy onboarding is complete.
 
-**Keel is working. Now make it yours.**
+## Post-proof handoff
 
-Keel allowed one test request and blocked another. This does not yet verify your application's path.
-Would you like help choosing your next policy, or connecting your application?
+Every post-proof handoff has two layers, and both belong to this contract:
 
-For policy help, use the existing `keel-policy` skill: inspect relevant repository actions without
-executing them, explain which restrictions Keel can enforce, and ask the human what should run freely,
-require approval, or be blocked. Draft only the requested canonical policy; never approximate an
-unsupported restriction. Hand it to [Policies](https://dashboard.keelapi.com/dashboard/policies): use
-the existing policy editor's **Paste a policy from your coding agent** → **Load into editor** →
-**Test policy** → **Save draft** flow. The human reviews and turns it on. Respect plan/authoring
-restrictions; if the import surface is unavailable, report that rather than weakening the policy.
-Do not introduce another authoring service or activate the draft.
+- `beginner_success_summary` — the default response.
+- `technical_verification_details` — the full labelled evidence, shown when the human asks for it.
+
+Layering is disclosure order, not omission. The details layer stays complete, correctly labelled, and
+available on request; nothing leaves the evidence model to shorten the summary, and the summary never
+contradicts, softens, or outruns the details. The summary carries only what this bounded proof
+observed plus the single scope caveat, so it mixes no provenance. Every human-asserted,
+source-inspected, proposed, or unresolved item keeps its label in the details layer, where it is
+shown rather than dropped.
+
+### Successful proof — default response
+
+When the verifier reports Allowed PASS and Blocked PASS against one stable profile, show only the
+following block. Render it as ordinary Markdown paragraphs, and add no preamble, evidence table,
+classification list, correlation identifier, coverage report, or local-state commentary.
+
+**Keel is working.**
+
+✓ An allowed request completed
+
+✓ A blocked request was stopped by Keel
+
+Keel used your first policy for this test.
+
+**Now make it yours.** What would you like to do next?
+
+**A — Make Keel yours.** I can inspect this app and help you decide what should run freely, need
+approval, or be blocked.
+
+**B — Connect your application.** I can show you how to give your actual application its Runtime key
+safely.
+
+**C — Done for now.**
+
+This proves Keel worked for the test. It does not yet prove that every path in your application uses
+Keel.
+
+Ask for `verification details` if you want the technical evidence.
+
+The policy line is scoped to this test deliberately. The verifier prints no policy identity, and no
+profile is re-read when this block is rendered, so neither the specific policy nor a present-tense
+**Active** status is established by the proof; the Step 2 dashboard status stays `human-asserted` and
+this line must never be promoted to a standing claim. Keep every other established fact out of the
+default: no `request_id`, `permit_id`, `http_status`, `body_status`, `error_stage`,
+`governance_decision`, `allowed_completed`, `keel_denied`, evidence-label taxonomy,
+`does_not_establish` list, `.keel/setup-state.json` content, stage name, or invocation cadence. Never
+write or imply that the application is protected, covered, deployed, verified end to end, or free of
+bypasses, and never say Keel or this skill turned the policy on. Offer the three choices and wait; the
+success response is not a policy interview.
+
+### `verification details` — the technical layer
+
+When the human asks for `verification details`, or asks in any equivalent way for the proof, the
+evidence, or the classifications, answer with the rigour this skill already requires and label every
+item:
+
+- the two `runtime-observed` classifications with their `http_status`, `body_status`,
+  `governance_decision`, `error_stage`, and `classification` values, plus the allow/deny semantics
+  that separate a permit-stage denial from a post-allow dispatch failure;
+- the non-secret `request_id` and `permit_id` for each result, or the explicit statement that exact
+  correlation is unavailable when either is null;
+- the profile-stability result that binds both requests to one verification profile;
+- connector health and policy **Active** status as `human-asserted`, and the prepared integration as
+  `source-inspected`;
+- `unresolved` application-path, alternate-path, streaming, background, credential, and egress
+  coverage; and
+- what the proof does not establish, including deployed revision, whole-application coverage, bypass
+  absence, provider downstream effect, and independent verification.
+
+Name the local `.keel/setup-state.json` stage here rather than in the summary, and repeat that the
+invocation count is local workflow state, not Keel evidence.
+
+### Failure — beginner explanation before classification
+
+A failed or ambiguous proof is never simplified into the success shape. Lead with one plain sentence
+naming what happened and the next human action, give the classification underneath as technical
+detail, then diagnose with the state-D failure playbook. The verifier already models this shape:
+
+Could not reach Keel.
+
+Check that this terminal has internet access, then try again.
+
+Technical details: transport_failed
+
+Never lead a failure with the internal classification, never drop the recovery action to stay brief,
+and never present a failure or a partial pair as success.
+
+### Make Keel yours
+
+When the human chooses this, use the existing `keel-policy` skill: inspect relevant repository actions
+without executing them, explain in beginner language which consequential actions Keel can control, and
+ask the human what should run freely, require approval, or be blocked. Draft only the requested
+canonical policy and validate it; never approximate an unsupported restriction. Hand the inactive
+draft to [Policies](https://dashboard.keelapi.com/dashboard/policies): use the existing policy
+editor's **Paste a policy from your coding agent** → **Load into editor** → **Test policy** →
+**Save draft** flow. The human reviews and turns it on. Respect plan/authoring restrictions; if the
+import surface is unavailable, report that rather than weakening the policy. Do not introduce another
+authoring service or activate the draft.
 
 ### Connect your application — separate, human-controlled runtime step
 
@@ -465,9 +555,33 @@ A mock, compile, or protocol double does not make the application path runtime-o
 tested decision seam, not whole-application protection, bypass absence, provider effect, or independent
 verification.
 
+Ask which runtime or deployment environment actually runs the application — a managed platform, a
+container orchestrator, a serverless runtime, a CI system, a virtual machine, or a local process — and
+give installation instructions specific to that platform's own secret store. Do not fall back to
+`launchctl`, a `.env` file, a shell-profile edit, or a restart of the coding agent as the default
+answer. The human installs the credential; the agent never handles the value.
+
+If exercising the live application path would put the Runtime key inside the coding-agent process, say
+that before doing it. It is an expansion of credential custody beyond the hidden-input verifier, and
+the human decides whether to accept it. If they decline, or that runtime is unavailable,
+application-path verification stays `unresolved`.
+
 Before exercising that real application path, create or update its narrow protocol-double test when
 the repository needs one and run the focused test. This is post-gate validation of the prepared adapter,
 not live-routing evidence.
+
+### Done for now
+
+When the human chooses this, close cleanly and add nothing else — no evidence dump, no coverage
+report, no cadence commentary, no state-file note:
+
+You're set. Keel's first allow/deny proof passed.
+
+You can come back anytime to create another policy or connect the application itself.
+
+The success block's scope caveat already disclosed that the application path is unverified, so ending
+here hides nothing. Do not repeat the unresolved inventory unless the human asks what is still
+outstanding, and do not treat a clean close as whole-application assurance.
 
 ## Post-gate deep assurance
 

@@ -150,9 +150,15 @@ For `basic`, the document must satisfy the full schema **and** every restriction
 
 - at most 10 rules;
 - only `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, and `contains` operators;
-- only `context.model`, `context.provider`, `context.provider_meta.region`,
-  `context.provider_meta.data_retention`, `context.estimated_cost_usd_micros`,
-  `context.prompt_token_count`, and `context.time_of_day` fields;
+- only `model`, `provider`, `estimated_cost_usd_micros`,
+  `context.provider_meta.region`, `context.provider_meta.data_retention`,
+  `context._keel.request_hour_utc`, and `context._keel.request_day_of_week` fields.
+  Every one is `keel_derived`, so a `basic` policy never gates on a caller-asserted
+  fact. `request_hour_utc` is an hour 0-23 in **UTC**, and `request_day_of_week` is
+  0-6 with Monday as 0 — a local-time restriction has to be converted before it is
+  written. There is no prompt-token field at this profile: `token_estimate` counts
+  input plus output, and `attrs.estimated_input_tokens` is caller-asserted, so
+  neither is a substitute;
 - each condition is one leaf, or one top-level `all`/`any` containing leaves only; no nesting
   and no `not`;
 - actions are limited to the schema's deny family (`deny` and `deny_if_*`),

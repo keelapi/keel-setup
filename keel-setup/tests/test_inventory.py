@@ -511,7 +511,8 @@ happened yet."""
     def test_first_proof_does_not_require_agent_credential_custody(self):
         text = SKILL.read_text(encoding="utf-8")
         self.assertIn("initial project/policy onboarding is complete", text)
-        self.assertIn("**Keel is working. Now make it yours.**", text)
+        self.assertIn("**Keel is working.**", text)
+        self.assertIn("**Now make it yours.** What would you like to do next?", text)
         self.assertIn("### Connect your application — separate, human-controlled runtime step", text)
         self.assertIn("Only when the human chooses this step", text)
         self.assertIn("shares bounded nonsecret results/correlation IDs", text)

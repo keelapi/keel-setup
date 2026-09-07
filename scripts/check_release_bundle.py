@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-09-06.4"
-PRODUCT_SOURCE_SHA256 = "94fde049707222d0f98af8b26677eb2f8d655bcca6103f6f420237293cc1bbc8"
+PUBLIC_RELEASE_VERSION = "2026-09-07.1"
+PRODUCT_SOURCE_SHA256 = "2abea6c9c3091db2d899b3226877e037341c7bf2aa7e434593d326c388e629a7"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -39,6 +39,7 @@ EXPECTED_FILES = {
     "keel-policy/reference/policy-document.schema.json",
     "keel-policy/scripts/validate_enforceability_report.py",
     "keel-policy/tests/test_validate_enforceability_report.py",
+    "keel-policy/tests/test_basic_profile_fields.py",
     "keel-setup/SKILL.md",
     "keel-setup/reference/coverage.schema.json",
     "keel-setup/reference/setup-state.schema.json",
@@ -48,6 +49,7 @@ EXPECTED_FILES = {
     "keel-setup/scripts/setup_state.py",
     "keel-setup/scripts/verify_execute.py",
     "keel-setup/tests/test_inventory.py",
+    "keel-setup/tests/test_post_proof_handoff.py",
     "keel-setup/tests/test_execute_request_contract.py",
     "keel-setup/tests/fixtures/fast_first_run_cases.py",
     "keel-setup/tests/test_fast_first_run.py",

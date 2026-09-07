@@ -1,7 +1,7 @@
 {
   "bundle_schema_version": "keel.public_setup_bundle.v1",
-  "public_release_version": "2026-09-06.4",
-  "product_source_sha256": "94fde049707222d0f98af8b26677eb2f8d655bcca6103f6f420237293cc1bbc8",
+  "public_release_version": "2026-09-07.1",
+  "product_source_sha256": "2abea6c9c3091db2d899b3226877e037341c7bf2aa7e434593d326c388e629a7",
   "included_roots": [
     "keel-policy",
     "keel-setup",
