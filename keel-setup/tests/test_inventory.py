@@ -429,9 +429,9 @@ class FastFirstRunTest(unittest.TestCase):
 
 **Step 1 of 3 — Connect OpenAI**
 
-In the Keel dashboard, open **Set up Keel**.
+Open [Set up Keel](https://dashboard.keelapi.com/dashboard/onboarding?provider=openai).
 
-Under **Connect OpenAI for the first proof**, click **Connect a provider**.
+Under **Connect your AI provider**, choose **OpenAI** and click **Connect a provider**.
 
 On **Connectors**, click **Add connector**, select **OpenAI**, and click **Next**.
 
@@ -470,8 +470,8 @@ happened yet."""
             "**Connection test result** shows **healthy**",
             "**Live test** shows **Yes**",
             "**Step 2 of 3 — Turn on your first Keel policy**",
-            "Read **What this setup applies** in step 1",
-            "under **Set up Production Governance**",
+            "Under **Review your first policy**",
+            "**Production Governance** summary",
             "**Apply Production Governance**",
             "**Review and turn it on**",
             "status says **Active**",
@@ -499,6 +499,23 @@ happened yet."""
         self.assertNotIn("--deny-model", gate)
         self.assertNotIn("paste the three copied lines", gate)
         self.assertIn("applies only to the currently supported OpenAI", gate)
+
+    def test_dirty_checkout_requires_explicit_choice_before_fallback(self):
+        text = SKILL.read_text(encoding="utf-8")
+        stop = text[text.index("When the result is `dirty_checkout`"):text.index("### Model-driven fallback")]
+        self.assertIn("stop immediately", stop)
+        self.assertIn("Wait for that choice", stop)
+        self.assertIn("fresh disposable checkout", stop)
+        self.assertIn("Only an explicit request for deeper inspection", stop)
+
+    def test_first_proof_does_not_require_agent_credential_custody(self):
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("initial project/policy onboarding is complete", text)
+        self.assertIn("**Keel is working. Now make it yours.**", text)
+        self.assertIn("### Connect your application — separate, human-controlled runtime step", text)
+        self.assertIn("Only when the human chooses this step", text)
+        self.assertIn("shares bounded nonsecret results/correlation IDs", text)
+        self.assertIn("retain deferred deep assurance as unresolved", text)
 
     def test_runtime_key_custody_uses_release_verified_hidden_input(self):
         text = SKILL.read_text(encoding="utf-8")

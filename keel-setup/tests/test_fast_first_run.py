@@ -104,6 +104,25 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["setup_state"]["stage"], "waiting_for_human")
         self.assertEqual(json.loads((root / ".keel" / "setup-state.json").read_text())["stage"], "waiting_for_human")
 
+    def test_dirty_checkout_stops_before_discovery_or_edits(self):
+        for untracked in (False, True):
+            with self.subTest(untracked=untracked):
+                root = self._repo()
+                path = root / ("notes.txt" if untracked else "app.py")
+                path.write_text("Uncommitted human work.\n", encoding="utf-8")
+                before = _git(root, "status", "--porcelain=v1", "--untracked-files=all")
+                with mock.patch.object(fast, "discover_golden_seam") as discover, \
+                     mock.patch.object(fast, "generate_adapter") as generate:
+                    result = self._run(root)
+                self.assertEqual(result["outcome"], "dirty_checkout", result)
+                self.assertEqual(result["changed_paths"], [])
+                discover.assert_not_called()
+                generate.assert_not_called()
+                self.assertFalse((root / ".keel").exists())
+                self.assertEqual(path.read_text(), "Uncommitted human work.\n")
+                self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), before)
+                self.assertIn("total_ms", result["timings"])
+
     def test_client_none_signature_is_preserved(self):
         root = self._repo()
         before = ast.parse((root / "app.py").read_text()).body

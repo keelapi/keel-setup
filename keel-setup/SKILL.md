@@ -161,6 +161,16 @@ review. Render the canonical First human gate block verbatim, substituting only 
 dashboard sequence for another provider. The helper result is source-inspected local preparation
 only; it is not runtime evidence.
 
+When the result is `dirty_checkout`, stop immediately. Do not inspect or integrate through the
+model-driven fallback automatically, initialize state, or commit/stash anything for the human. Say:
+
+Keel stopped because this checkout has uncommitted work. I have not changed anything.
+Choose one: commit or stash your work and retry; use a fresh disposable checkout; or explicitly ask
+me for deeper model-driven inspection of this checkout.
+
+Wait for that choice. Only an explicit request for deeper inspection permits the model-driven
+fallback while preserving the existing work. A dirty checkout is not an integration failure.
+
 Any other outcome is a no-guess fallback. `ambiguous`, `unsupported_shape`,
 `model_review_required`, `unsafe_contract_change`, `validation_failed`, and `untrusted_bundle` do not
 permit the helper to record a successful milestone. The helper restores its own attempted edits after
@@ -282,9 +292,9 @@ I prepared the OpenAI call in `PATH` for Keel. Nothing is using Keel yet.
 
 **Step 1 of 3 — Connect OpenAI**
 
-In the Keel dashboard, open **Set up Keel**.
+Open [Set up Keel](https://dashboard.keelapi.com/dashboard/onboarding?provider=openai).
 
-Under **Connect OpenAI for the first proof**, click **Connect a provider**.
+Under **Connect your AI provider**, choose **OpenAI** and click **Connect a provider**.
 
 On **Connectors**, click **Add connector**, select **OpenAI**, and click **Next**.
 
@@ -303,10 +313,11 @@ After the human replies `done`, treat connector health only as human-asserted an
 
 **Step 2 of 3 — Turn on your first Keel policy**
 
-Return to **Set up Keel**.
+Return to [Set up Keel](https://dashboard.keelapi.com/dashboard/onboarding?provider=openai).
 
-Read **What this setup applies** in step 1. Then, under **Set up Production Governance**, click
-**Apply Production Governance**. This saves an inactive policy; it does not turn it on.
+Under **Review your first policy**, read the **Production Governance** summary. Use **See policy
+details** if you want more information. Click **Apply Production Governance**. This saves an inactive
+policy; it does not turn it on.
 
 Click **Review and turn it on**.
 
@@ -323,7 +334,8 @@ Enter a name such as `Local setup`, leave **Runtime key** selected, and click **
 
 When Keel shows the key, copy it; it appears only once.
 
-Do not paste the key into Codex, Claude, Cursor, or another chat. In a terminal you control, run the
+Do not paste the key into Codex, Claude, Cursor, or another chat. Open Terminal. You can run this from
+any folder. In a terminal you control, run the
 release-pinned verification commands below after replacing `40_HEX_SHA` with the exact bundle SHA
 already established in this setup:
 
@@ -423,8 +435,33 @@ Never infer denial from HTTP 403 alone:
   `governance.decision=allow`; its HTTP status can also be 403.
 - Freshness or authentication errors make no policy claim.
 
-After the protocol helper passes, exercise the application's narrowest real path. A mock, compile, or
-protocol double does not make the application path runtime-observed. State D is bounded proof of the
+After the protocol helper passes, initial project/policy onboarding is complete. Show:
+
+**Keel is working. Now make it yours.**
+
+Keel allowed one test request and blocked another. This does not yet verify your application's path.
+Would you like help choosing your next policy, or connecting your application?
+
+For policy help, use the existing `keel-policy` skill: inspect relevant repository actions without
+executing them, explain which restrictions Keel can enforce, and ask the human what should run freely,
+require approval, or be blocked. Draft only the requested canonical policy; never approximate an
+unsupported restriction. Hand it to [Policies](https://dashboard.keelapi.com/dashboard/policies): use
+the existing policy editor's **Paste a policy from your coding agent** → **Load into editor** →
+**Test policy** → **Save draft** flow. The human reviews and turns it on. Respect plan/authoring
+restrictions; if the import surface is unavailable, report that rather than weakening the policy.
+Do not introduce another authoring service or activate the draft.
+
+### Connect your application — separate, human-controlled runtime step
+
+Only when the human chooses this step, help them install the Runtime key in the application's real
+runtime or secret manager outside the conversation. Do not request the key, read secret files, inject
+it into the coding-agent environment, or require a Codex restart, shell-profile edit, or environment
+installation merely to complete first proof. The human runs the real application in that runtime and
+shares bounded nonsecret results/correlation IDs. Never import the application to acquire credentials.
+If that runtime is unavailable, leave application-path verification unresolved; do not undo the
+successful project/policy proof or mark whole-application assurance complete.
+
+A mock, compile, or protocol double does not make the application path runtime-observed. State D is bounded proof of the
 tested decision seam, not whole-application protection, bypass absence, provider effect, or independent
 verification.
 
@@ -525,8 +562,9 @@ helper reports what is due in its `due` list.
   to the guided gate without repeating Fast First Run. The local state does not prove which human phase
   was completed. Use only human assertions retained in the current conversation; if they are absent,
   restart at Step 1 instead of inferring dashboard progress. If the gate is satisfied, run the
-  deterministic profile verifier and narrow application path, then continue the deferred deep assurance
-  work. If it is not satisfied, improve only a focused local check that is useful without the credential
+  deterministic profile verifier through the human-controlled terminal. Offer the separate application
+  runtime step and retain deferred deep assurance as unresolved until performed. If it is not satisfied,
+  improve only a focused local check that is useful without the credential
   and repeat one concise human request.
 - **Invocation 5 — drift audit.** Search for new `/v1/proxy/` references, new direct provider clients,
   new MCP tools or schemas, direct-handler and adapter bypasses, background execution, streaming

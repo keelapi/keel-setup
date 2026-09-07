@@ -185,7 +185,11 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
         raise PipelineFailure("model_review_required", "repository has no immutable Git revision")
     dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
     if dirty:
-        raise PipelineFailure("model_review_required", "golden path requires a clean application checkout")
+        raise PipelineFailure(
+            "dirty_checkout",
+            "Keel will not modify existing uncommitted work automatically. Commit or stash it and retry, "
+            "use a fresh disposable checkout, or explicitly request deeper model-driven inspection.",
+        )
 
     instruction_names = {"AGENTS.md", "CLAUDE.md", ".cursorrules", "copilot-instructions.md"}
     instructions: list[str] = []
