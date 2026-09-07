@@ -45,6 +45,7 @@ CORRELATION_HEADERS = {
 }
 
 MAX_RESPONSE_BYTES = 64 * 1024
+EXECUTE_TIMEOUT_SECONDS = 30.0
 _ULID_PATTERN = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}", re.IGNORECASE)
 _SAFE_ERROR_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_.-]{0,127}")
 _BODY_STATUSES = frozenset({"completed", "denied", "failed"})
@@ -344,7 +345,13 @@ def _safe_error_code(value: Any) -> str | None:
 
 
 def execute_attempt(
-    *, base_url: str, key: str, provider: str, model: str, expectation: str, timeout: float = 10.0
+    *,
+    base_url: str,
+    key: str,
+    provider: str,
+    model: str,
+    expectation: str,
+    timeout: float = EXECUTE_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     # Freshness is intentionally created inside this function, immediately before this attempt.
     timestamp = str(int(time.time()))
@@ -526,6 +533,12 @@ def main(argv: list[str] | None = None) -> int:
             ),
         ]
         safe_results = [redact_record(result, key) for result in results]
+        if any(result["classification"] == "transport_failed" for result in safe_results):
+            print(
+                "Could not reach Keel. Check that this terminal has internet access, then try again.",
+                file=sys.stderr,
+            )
+            print("Technical details: transport_failed", file=sys.stderr)
         for safe_result in safe_results:
             print(json.dumps(safe_result, sort_keys=True, separators=(",", ":")))
         if args.hidden_input:

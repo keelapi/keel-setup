@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -253,6 +254,43 @@ class ProtocolDoubleTest(unittest.TestCase):
                 result = verify_execute.execute_attempt(base_url="https://example.invalid", key="redacted-test-value", provider="test", model="model", expectation="allow")
                 self.assertEqual(result["classification"], "transport_failed")
                 self.assertNotIn("sensitive", json.dumps(result))
+
+    def test_default_execute_timeout_covers_normal_provider_latency(self):
+        timeout = inspect.signature(verify_execute.execute_attempt).parameters["timeout"].default
+        self.assertEqual(timeout, 30.0)
+
+    def test_transport_failure_leads_with_beginner_message_and_keeps_classification(self):
+        sentinel = "unit-test-key-that-must-not-print"
+        result = {
+            "model": "model",
+            "expectation": "allow",
+            "request_id": None,
+            "permit_id": None,
+            "http_status": None,
+            "body_status": None,
+            "governance_decision": None,
+            "error_stage": None,
+            "error_code": None,
+            "classification": "transport_failed",
+        }
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(os.environ, {"KEEL_API_KEY": sentinel}, clear=False),
+            mock.patch.object(verify_execute, "execute_attempt", return_value=result),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = verify_execute.main(
+                ["--provider", "test", "--allow-model", "a", "--deny-model", "b"]
+            )
+        self.assertEqual(code, 1)
+        self.assertTrue(err.getvalue().startswith("Could not reach Keel."))
+        self.assertIn("Technical details: transport_failed", err.getvalue())
+        self.assertEqual(
+            [json.loads(line)["classification"] for line in out.getvalue().splitlines()[:2]],
+            ["transport_failed", "transport_failed"],
+        )
+        self.assertNotIn(sentinel, out.getvalue() + err.getvalue())
 
     def test_missing_key_is_local_precondition_exit_two(self):
         env = dict(os.environ)
