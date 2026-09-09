@@ -6,7 +6,7 @@ after the pinned public release is verified. It is never accepted as an
 argument, read from the environment, written to a file, or printed.
 
 This helper is transport, not judgement. It performs one bounded read-only
-``GET /v1/authoring-context``, validates the exact closed response schema, and
+``GET /v1/authoring-context?view=operations``, validates the exact closed response schema, and
 prints the server's answer unchanged. It does not choose, rank, filter, or
 reinterpret models: deciding which model suits an application requires that
 application's intent, which this process does not have and must not invent.
@@ -42,7 +42,7 @@ DEFAULT_BASE_URL = "https://api.keelapi.com"
 #: response would misreport ``model_count`` and ``truncated``.
 MAX_RESPONSE_BYTES = 64 * 1024
 
-#: The largest model list schema version 1 may carry.
+#: The largest model list schema version 2 may carry.
 MAX_MODELS = 200
 
 #: A sane ceiling on the server's reported total, so a corrupt count cannot
@@ -50,7 +50,7 @@ MAX_MODELS = 200
 MAX_MODEL_COUNT = 1_000_000
 
 AUTHORING_CONTEXT_TIMEOUT_SECONDS = 15.0
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _TOP_LEVEL_FIELDS = frozenset(
     {
@@ -72,6 +72,7 @@ _MODEL_FIELDS = frozenset(
         "prompt_per_1k_usd",
         "completion_per_1k_usd",
         "pricing_quality",
+        "operations",
     }
 )
 
@@ -79,6 +80,65 @@ _MODEL_FIELDS = frozenset(
 #: unrecognised value is refused rather than passed through as if understood.
 _AUTHORING_LEVELS = frozenset({"template", "basic", "full"})
 _PRICING_QUALITIES = frozenset({"authoritative", "approximate", "placeholder", "unknown"})
+
+#: Published schema-2 operation vocabulary. Exact data values, never commands.
+#: Unknown values require an explicitly reviewed helper release; no guessing,
+#: normalisation, filtering, ranking, or fallback to the v1 response.
+_OPERATIONS = frozenset(
+    {
+        "generate.text",
+        "embed.text",
+        "generate.image",
+        "edit.image",
+        "understand.image",
+        "generate.audio",
+        "transcribe.audio",
+        "generate.video",
+        "understand.video",
+        "realtime.session",
+        "call.outbound",
+        "call.respond",
+        "message.send",
+        "calendar.event.create",
+        "travel.air.search",
+        "travel.air.price",
+        "travel.air.book",
+        "travel.air.manage",
+        "travel.lodging.search",
+        "travel.lodging.book",
+        "travel.lodging.manage",
+        "travel.car.search",
+        "travel.car.book",
+        "travel.car.manage",
+        "travel.rail.search",
+        "travel.rail.book",
+        "travel.rail.manage",
+        "travel.order.get",
+        "travel.order.create",
+        "travel.order.change",
+        "travel.order.cancel",
+        "travel.ticket.issue",
+        "travel.ticket.void",
+        "travel.exchange",
+        "travel.refund",
+        "travel.seatmap.get",
+        "travel.seat.select",
+        "travel.profile.read",
+        "travel.profile.write",
+        "travel.queue.read",
+        "travel.queue.write",
+        "travel.trip.read",
+        "travel.trip.sync",
+        "computer.use",
+        "browser.action",
+        "code_execution",
+        "call.tools",
+        "run.batch",
+        "run.async",
+        "cost_permit.authorize",
+        "payment.execute",
+    }
+)
 
 #: Descriptive identifiers. These are bounded, not allowlisted: a new provider
 #: or lifecycle value is Keel's to introduce, and refusing it would make this
@@ -296,6 +356,7 @@ def _parse_model(entry: Any, index: int) -> dict[str, Any]:
     lifecycle_status = entry["lifecycle_status"]
     routable = entry["routable_in_policies"]
     quality = entry["pricing_quality"]
+    operations = entry["operations"]
 
     if not _bounded_string(provider, _PROVIDER_PATTERN):
         raise AuthoringContextError(f"authoring context model {index} had an invalid provider")
@@ -317,6 +378,14 @@ def _parse_model(entry: Any, index: int) -> dict[str, Any]:
     if quality not in _PRICING_QUALITIES:
         raise AuthoringContextError(f"authoring context model {index} had an unrecognised pricing quality")
 
+    if (
+        not isinstance(operations, list)
+        or not 1 <= len(operations) <= len(_OPERATIONS)
+        or any(not isinstance(value, str) or value not in _OPERATIONS for value in operations)
+        or len(set(operations)) != len(operations)
+    ):
+        raise AuthoringContextError(f"authoring context model {index} had invalid operations")
+
     return {
         "provider": provider,
         "model_id": model_id,
@@ -326,23 +395,26 @@ def _parse_model(entry: Any, index: int) -> dict[str, Any]:
         "prompt_per_1k_usd": _rate(entry["prompt_per_1k_usd"], f"model {index} prompt rate"),
         "completion_per_1k_usd": _rate(entry["completion_per_1k_usd"], f"model {index} completion rate"),
         "pricing_quality": quality,
+        "operations": operations[:],
     }
 
 
 def parse_authoring_context(raw: bytes) -> dict[str, Any]:
     """Validate the exact closed schema and return it with server order intact."""
 
+    if len(raw) > MAX_RESPONSE_BYTES:
+        raise AuthoringContextError("authoring context response exceeded the 64 KiB bound")
     try:
         payload = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise AuthoringContextError("authoring context response was malformed") from exc
     if not isinstance(payload, dict) or set(payload) != _TOP_LEVEL_FIELDS:
         raise AuthoringContextError("authoring context response had an unexpected shape")
-    if payload["schema_version"] != SCHEMA_VERSION or isinstance(payload["schema_version"], bool):
-        raise AuthoringContextError("authoring context schema version is not supported by this helper")
+    if not _is_int(payload["schema_version"]) or payload["schema_version"] != SCHEMA_VERSION:
+        raise AuthoringContextError("authoring context schema version 2 is required; this helper cannot fall back to v1")
     if payload["authoring_level"] not in _AUTHORING_LEVELS:
         raise AuthoringContextError("authoring context authoring level was unrecognised")
-    # Schema version 1 declares this null. A real timestamp would be a different
+    # Schema version 2 declares this null. A real timestamp would be a different
     # contract, and silently passing one through would let a consumer describe
     # prices as current when this helper cannot establish that.
     if payload["pricing_asof"] is not None:
@@ -392,7 +464,7 @@ def fetch_authoring_context(
     """Perform the one bounded read-only request this helper is allowed to make."""
 
     request = urllib.request.Request(
-        f"{base_url}/v1/authoring-context",
+        f"{base_url}/v1/authoring-context?view=operations",
         method="GET",
         headers=_fresh_headers(credential),
     )
@@ -407,7 +479,7 @@ def fetch_authoring_context(
         if guidance:
             raise AuthoringContextError(f"{guidance}{detail}") from None
         raise AuthoringContextError(
-            f"Keel did not return the authoring context (HTTP {exc.code}{detail})."
+            f"Keel did not return authoring context v2 (HTTP {exc.code}{detail})."
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise AuthoringContextError(

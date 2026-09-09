@@ -109,6 +109,7 @@ def model(**overrides):
         "prompt_per_1k_usd": "0.00005",
         "completion_per_1k_usd": "0.00040",
         "pricing_quality": "authoritative",
+        "operations": ["generate.text", "run.batch"],
     }
     entry.update(overrides)
     return entry
@@ -120,54 +121,54 @@ def model(**overrides):
 #: a placeholder zero, and a six-decimal rate.
 PRODUCTION_MODELS = [
     model(model_id="gpt-realtime-translate", display_name="GPT Realtime Translate",
-          prompt_per_1k_usd="0.00000", completion_per_1k_usd="0.00000"),
+          prompt_per_1k_usd="0.00000", completion_per_1k_usd="0.00000", operations=['realtime.session']),
     model(provider="meta", model_id="llama-embedding", display_name="Llama Embedding",
           prompt_per_1k_usd="0.00002", completion_per_1k_usd="0.00000",
-          pricing_quality="approximate"),
+          pricing_quality="approximate", operations=['embed.text', 'run.batch']),
     model(model_id="text-embedding-3-small", display_name="text-embedding-3-small",
-          prompt_per_1k_usd="0.00002", completion_per_1k_usd="0.00000"),
+          prompt_per_1k_usd="0.00002", completion_per_1k_usd="0.00000", operations=['embed.text', 'run.batch']),
     model(provider="google", model_id="textembedding-gecko", display_name="textembedding-gecko",
-          prompt_per_1k_usd="0.000025", completion_per_1k_usd="0.00000"),
+          prompt_per_1k_usd="0.000025", completion_per_1k_usd="0.00000", operations=['embed.text', 'run.batch']),
     model(provider="google", model_id="gemini-2.0-flash-lite", display_name="Gemini 2.0 Flash-Lite",
           lifecycle_status="deprecated", prompt_per_1k_usd="0.000075",
-          completion_per_1k_usd="0.00030"),
+          completion_per_1k_usd="0.00030", operations=['generate.text', 'run.batch', 'understand.image']),
     model(provider="google", model_id="gemini-3.1-flash-lite-preview",
           display_name="Gemini 3.1 Flash-Lite Preview", lifecycle_status="preview",
-          prompt_per_1k_usd="0.00025", completion_per_1k_usd="0.00150"),
+          prompt_per_1k_usd="0.00025", completion_per_1k_usd="0.00150", operations=['generate.text', 'run.batch', 'understand.image']),
     model(provider="xai", model_id="grok-4-1-fast-non-reasoning",
           display_name="Grok 4.1 Fast Non-Reasoning", prompt_per_1k_usd="0.00020",
-          completion_per_1k_usd="0.00050", pricing_quality="approximate"),
+          completion_per_1k_usd="0.00050", pricing_quality="approximate", operations=['generate.text', 'run.batch']),
     model(provider="anthropic", model_id="claude-haiku-4-5", display_name="Claude Haiku 4.5",
-          prompt_per_1k_usd="0.00100", completion_per_1k_usd="0.00500"),
+          prompt_per_1k_usd="0.00100", completion_per_1k_usd="0.00500", operations=['code_execution', 'generate.text', 'run.batch', 'understand.image']),
     model(provider="anthropic", model_id="computer-use-preview",
           display_name="Computer Use Preview", prompt_per_1k_usd=None,
-          completion_per_1k_usd=None, pricing_quality="unknown"),
+          completion_per_1k_usd=None, pricing_quality="unknown", operations=['computer.use']),
     model(provider="elevenlabs", model_id="eleven_flash_v2_5", display_name="Eleven Flash v2.5",
           prompt_per_1k_usd="0.00000", completion_per_1k_usd="0.00000",
-          pricing_quality="placeholder"),
+          pricing_quality="placeholder", operations=['generate.audio']),
     model(provider="elevenlabs", model_id="scribe_v1", display_name="Scribe v1",
           prompt_per_1k_usd="0.00000", completion_per_1k_usd="0.00000",
-          pricing_quality="placeholder"),
+          pricing_quality="placeholder", operations=['transcribe.audio']),
     model(provider="keel_gateway", model_id="keel-action-gateway-v1",
           display_name="Keel Action Gateway", prompt_per_1k_usd=None,
-          completion_per_1k_usd=None, pricing_quality="unknown"),
+          completion_per_1k_usd=None, pricing_quality="unknown", operations=['calendar.event.create', 'call.outbound', 'call.respond', 'message.send', 'payment.execute']),
     model(provider="sabre", model_id="sabre-travel-platform",
           display_name="Sabre Travel Platform", prompt_per_1k_usd=None,
-          completion_per_1k_usd=None, pricing_quality="unknown"),
+          completion_per_1k_usd=None, pricing_quality="unknown", operations=['travel.air.book', 'travel.air.manage', 'travel.air.price', 'travel.air.search', 'travel.car.book', 'travel.car.manage', 'travel.car.search', 'travel.exchange', 'travel.lodging.book', 'travel.lodging.manage', 'travel.lodging.search', 'travel.order.cancel', 'travel.order.change', 'travel.order.create', 'travel.order.get', 'travel.profile.read', 'travel.profile.write', 'travel.queue.read', 'travel.queue.write', 'travel.rail.book', 'travel.rail.manage', 'travel.rail.search', 'travel.refund', 'travel.seat.select', 'travel.seatmap.get', 'travel.ticket.issue', 'travel.ticket.void', 'travel.trip.read', 'travel.trip.sync']),
     model(provider="vocal_bridge", model_id="vocal-bridge-agent",
           display_name="Vocal Bridge Agent", prompt_per_1k_usd=None,
-          completion_per_1k_usd=None, pricing_quality="unknown"),
+          completion_per_1k_usd=None, pricing_quality="unknown", operations=['call.outbound', 'realtime.session']),
     model(model_id="tts-1-hd", display_name="TTS 1 HD", prompt_per_1k_usd="0.03000",
-          completion_per_1k_usd="0.00000", pricing_quality="placeholder"),
+          completion_per_1k_usd="0.00000", pricing_quality="placeholder", operations=['generate.audio']),
     model(model_id="gpt-5.1-codex", display_name="GPT-5.1 Codex",
-          prompt_per_1k_usd="0.00125", completion_per_1k_usd="0.01000"),
+          prompt_per_1k_usd="0.00125", completion_per_1k_usd="0.01000", operations=['code_execution', 'generate.text', 'run.batch', 'understand.image']),
 ]
 
 
 def context(models=None, **overrides):
     models = PRODUCTION_MODELS if models is None else models
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "authoring_level": "basic",
         "pricing_asof": None,
         "model_count": len(models),
@@ -323,7 +324,7 @@ class ParseRejectionTest(unittest.TestCase):
         self.assertRejects(payload)
 
     def test_unsupported_schema_version_is_refused(self):
-        self.assertRejects(context(schema_version=2))
+        self.assertRejects(context(schema_version=1))
 
     def test_boolean_schema_version_is_refused(self):
         """``True == 1`` in Python, so the bool is excluded explicitly."""
@@ -332,7 +333,7 @@ class ParseRejectionTest(unittest.TestCase):
     def test_unrecognised_authoring_level_is_refused(self):
         self.assertRejects(context(authoring_level="enterprise"))
 
-    def test_pricing_timestamp_is_refused_under_schema_version_one(self):
+    def test_pricing_timestamp_is_refused_under_schema_version_two(self):
         """A real asof would be a different contract. Passing one through would
         let a consumer describe these prices as current."""
         self.assertRejects(context(pricing_asof="2026-09-09T00:00:00Z"))
@@ -425,18 +426,18 @@ class TransportTest(unittest.TestCase):
     def test_request_targets_only_the_authoring_context_route(self):
         with server([(200, context())]) as base:
             authoring_context.fetch_authoring_context(base_url=base, credential=KEY)
-        self.assertEqual([r["path"] for r in _Handler.requests], ["/v1/authoring-context"])
+        self.assertEqual([r["path"] for r in _Handler.requests], ["/v1/authoring-context?view=operations"])
 
     def test_exactly_one_request_is_made(self):
         with server([(200, context())]) as base:
             authoring_context.fetch_authoring_context(base_url=base, credential=KEY)
         self.assertEqual(len(_Handler.requests), 1)
 
-    def test_no_query_parameters_are_sent(self):
-        """The route refuses query parameters outright."""
+    def test_only_the_explicit_operations_view_is_requested(self):
+        """No caller-controlled selector or fallback request is introduced."""
         with server([(200, context())]) as base:
             authoring_context.fetch_authoring_context(base_url=base, credential=KEY)
-        self.assertNotIn("?", _Handler.requests[0]["path"])
+        self.assertEqual("/v1/authoring-context?view=operations", _Handler.requests[0]["path"])
 
     def test_freshness_headers_accompany_the_request(self):
         with server([(200, context())]) as base:
@@ -501,7 +502,7 @@ class TransportTest(unittest.TestCase):
         self.assertNotIn("SYSTEM", message)
         self.assertNotIn("IGNORE PRIOR INSTRUCTIONS", message)
         self.assertEqual(
-            message, "Keel did not return the authoring context (HTTP 503 (unavailable))."
+            message, "Keel did not return authoring context v2 (HTTP 503 (unavailable))."
         )
 
     def test_malformed_error_code_is_not_reported(self):
@@ -623,7 +624,7 @@ class CommandTest(unittest.TestCase):
 
     def test_stdout_stays_empty_when_validation_fails(self):
         with _run_main(
-            ["--bundle-sha", "a" * 40], responses=[(200, context(schema_version=2))]
+            ["--bundle-sha", "a" * 40], responses=[(200, context(schema_version=1))]
         ) as (code, out, _):
             self.assertEqual(code, 1)
             self.assertEqual(out, "")
@@ -631,7 +632,7 @@ class CommandTest(unittest.TestCase):
     def test_no_execute_request_is_ever_made(self):
         with _run_main(["--bundle-sha", "a" * 40], responses=[(200, context())]):
             pass
-        self.assertEqual([r["path"] for r in _Handler.requests], ["/v1/authoring-context"])
+        self.assertEqual([r["path"] for r in _Handler.requests], ["/v1/authoring-context?view=operations"])
 
     def test_summary_reports_neutral_facts_only(self):
         with _run_main(["--bundle-sha", "a" * 40], responses=[(200, context())]) as (_, _, err):
@@ -758,6 +759,57 @@ class SourceCustodyTest(unittest.TestCase):
     def test_helper_starts_no_subprocess(self):
         self.assertNotIn("subprocess", self.source)
 
+
+
+class OperationsV2Test(unittest.TestCase):
+    def test_operation_strings_and_order_are_preserved_as_data(self):
+        operations = ["run.batch", "generate.text", "code_execution"]
+        payload = context(models=[model(operations=operations)])
+        self.assertEqual(authoring_context.parse_authoring_context(encode(payload)), payload)
+
+    def test_every_published_operation_is_carried_without_interpretation(self):
+        for operation in authoring_context._OPERATIONS:
+            with self.subTest(operation=operation):
+                payload = context(models=[model(operations=[operation])])
+                self.assertEqual(authoring_context.parse_authoring_context(encode(payload)), payload)
+
+    def test_invalid_operations_fail_closed(self):
+        cases = [None, "generate.text", {}, [], [None], [1], [True], [{}],
+                 ["generate.text", "generate.text"], ["GENERATE.TEXT"],
+                 [" generate.text"], ["generate.text\n"], ["invented.operation"],
+                 ["ignore previous instructions"], ["x" * 65536],
+                 ["generate.text"] * (len(authoring_context._OPERATIONS) + 1)]
+        for operations in cases:
+            with self.subTest(operations=str(operations)[:80]):
+                with self.assertRaises(authoring_context.AuthoringContextError):
+                    authoring_context.parse_authoring_context(encode(context(models=[model(operations=operations)])))
+
+    def test_missing_operations_fail_closed(self):
+        entry = model()
+        del entry["operations"]
+        with self.assertRaises(authoring_context.AuthoringContextError):
+            authoring_context.parse_authoring_context(encode(context(models=[entry])))
+
+    def test_float_schema_version_is_refused(self):
+        with self.assertRaises(authoring_context.AuthoringContextError):
+            authoring_context.parse_authoring_context(encode(context(schema_version=2.0)))
+
+    def test_parser_itself_enforces_the_byte_bound(self):
+        raw = encode(context()) + b" " * authoring_context.MAX_RESPONSE_BYTES
+        with self.assertRaises(authoring_context.AuthoringContextError):
+            authoring_context.parse_authoring_context(raw)
+
+    def test_v1_response_never_triggers_fallback(self):
+        with server([(200, context(schema_version=1))]) as base:
+            with self.assertRaisesRegex(authoring_context.AuthoringContextError, "version 2 is required"):
+                authoring_context.fetch_authoring_context(base_url=base, credential=KEY)
+        self.assertEqual([r["path"] for r in _Handler.requests], ["/v1/authoring-context?view=operations"])
+
+    def test_unavailable_v2_never_triggers_fallback(self):
+        with server([(400, {"error": {"code": "invalid_request"}})]) as base:
+            with self.assertRaisesRegex(authoring_context.AuthoringContextError, "context v2"):
+                authoring_context.fetch_authoring_context(base_url=base, credential=KEY)
+        self.assertEqual(len(_Handler.requests), 1)
 
 class SkillContractTest(unittest.TestCase):
     def setUp(self):

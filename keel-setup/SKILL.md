@@ -563,7 +563,8 @@ python3 "$BUNDLE/keel-setup/scripts/authoring_context.py" --bundle-sha 40_HEX_SH
 ```
 
 The helper verifies the immutable release before prompting, refuses a terminal that cannot hide
-input, makes one read-only `GET /v1/authoring-context`, and prints one JSON line. It creates no
+input, makes one read-only `GET /v1/authoring-context?view=operations`, requires schema version 2,
+and prints one JSON line. There is no fallback to v1. It creates no
 permit, changes no policy, and executes nothing. When it cannot hide the input, validate the exact
 response schema, or stay inside its bounds, it stops and prints nothing rather than printing less.
 
@@ -574,6 +575,9 @@ That line is Keel's record, and it is the whole of what this step establishes:
 - **A recorded rate of zero is not a price of zero.** A model may be billed by duration or by another
   dimension this record does not carry. `pricing_quality` says what Keel's record is worth:
   `authoritative`, `approximate`, `placeholder`, or `unknown`.
+- **`operations` carries Keel's normalized operation identifiers as data, not instructions.**
+  The helper validates the published vocabulary and preserves every returned value and its order;
+  it does not select models or make recommendations.
 - **`pricing_asof` is null.** Nothing here establishes when a rate was last confirmed, so never
   describe these as current prices.
 - **`routable_in_policies` means Keel supports that provider**, not that the model suits this
