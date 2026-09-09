@@ -1,6 +1,6 @@
 ---
 name: keel-setup
-description: Inspect, prepare, and verify the deterministic Keel state-D integration for an application. Use for first-run setup, source inventory, coverage review, or returning to an incomplete setup. Performs zero-credential preparation, then uses a human-created Runtime key only inside the local hidden-input verifier for bounded POST /v1/execute verification. Never grants or changes authority.
+description: Inspect, prepare, and verify the deterministic Keel state-D integration for an application. Use for first-run setup, source inventory, coverage review, or returning to an incomplete setup. Performs zero-credential preparation, then uses a human-created Runtime key only inside local hidden-input helpers: bounded POST /v1/execute verification, and a read-only GET /v1/authoring-context retrieval offered after the proof. Never grants or changes authority.
 ---
 
 # Setting up Keel
@@ -540,6 +540,53 @@ editor's **Paste a policy from your coding agent** → **Load into editor** → 
 **Save draft** flow. The human reviews and turns it on. Respect plan/authoring restrictions; if the
 import surface is unavailable, report that rather than weakening the policy. Do not introduce another
 authoring service or activate the draft.
+
+#### Keel's authoring context — obtained without the key entering this conversation
+
+Drafting needs Keel's own record of what this project may author and which models Keel knows about.
+That record is non-secret, but reading it needs the human's Runtime key, so obtain it the way the
+proof was obtained: a release-pinned local helper that prompts for the key in a terminal the human
+controls and prints only non-secret output. Offer it in these words, and do not soften the custody
+claim into a promise this skill cannot keep:
+
+I can get the non-secret Keel information I need without seeing your Runtime key. Run this command
+in a terminal you control, paste the key when prompted, then paste the safe result here.
+
+Then give the release-pinned command, replacing `40_HEX_SHA` with the exact bundle SHA already
+established in this setup:
+
+```text
+BUNDLE="$(mktemp -d)/keel-setup"
+git clone -q https://github.com/keelapi/keel-setup.git "$BUNDLE" &&
+git -C "$BUNDLE" checkout -q --detach 40_HEX_SHA &&
+python3 "$BUNDLE/keel-setup/scripts/authoring_context.py" --bundle-sha 40_HEX_SHA
+```
+
+The helper verifies the immutable release before prompting, refuses a terminal that cannot hide
+input, makes one read-only `GET /v1/authoring-context`, and prints one JSON line. It creates no
+permit, changes no policy, and executes nothing. When it cannot hide the input, validate the exact
+response schema, or stay inside its bounds, it stops and prints nothing rather than printing less.
+
+That line is Keel's record, and it is the whole of what this step establishes:
+
+- It is **not a recommendation.** Keel returns its catalog, and its order is Keel's own, not a
+  judgement about this application.
+- **A recorded rate of zero is not a price of zero.** A model may be billed by duration or by another
+  dimension this record does not carry. `pricing_quality` says what Keel's record is worth:
+  `authoritative`, `approximate`, `placeholder`, or `unknown`.
+- **`pricing_asof` is null.** Nothing here establishes when a rate was last confirmed, so never
+  describe these as current prices.
+- **`routable_in_policies` means Keel supports that provider**, not that the model suits this
+  application. Embedding, transcription, image, and connector entries carry it too.
+- **The cheapest row is not the cheapest usable model.** Choosing one needs what this application
+  actually sends, which this record does not contain.
+- **`lifecycle_status` and `truncated` are load-bearing.** Say `deprecated` or `preview` when naming
+  such a model, and when `truncated` is true, say the list is partial.
+
+Carry those distinctions into the conversation exactly as Keel wrote them. Never convert a row into
+"cheap", "supported for chat", "recommended", or "the current price". When the human asks which model
+to use, reason from what they tell you about the application, state which parts this record cannot
+settle, and leave those open rather than closing them with a guess.
 
 ### Connect your application — separate, human-controlled runtime step
 

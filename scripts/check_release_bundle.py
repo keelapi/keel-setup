@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-09-07.1"
-PRODUCT_SOURCE_SHA256 = "2abea6c9c3091db2d899b3226877e037341c7bf2aa7e434593d326c388e629a7"
+PUBLIC_RELEASE_VERSION = "2026-09-08.1"
+PRODUCT_SOURCE_SHA256 = "a2ae453065205089ed7ed35e6311d3c7935b6ad7eb0f7b809888721c767219b3"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -48,6 +48,7 @@ EXPECTED_FILES = {
     "keel-setup/scripts/inventory.py",
     "keel-setup/scripts/setup_state.py",
     "keel-setup/scripts/verify_execute.py",
+    "keel-setup/scripts/authoring_context.py",
     "keel-setup/tests/test_inventory.py",
     "keel-setup/tests/test_post_proof_handoff.py",
     "keel-setup/tests/test_execute_request_contract.py",
@@ -55,6 +56,7 @@ EXPECTED_FILES = {
     "keel-setup/tests/test_fast_first_run.py",
     "keel-setup/tests/test_setup_state.py",
     "keel-setup/tests/test_verify_execute.py",
+    "keel-setup/tests/test_authoring_context.py",
     "scripts/check_release_bundle.py",
     "scripts/check_execute_contract.py",
     "shared/CONSTITUTION.md",
@@ -67,7 +69,12 @@ EXPECTED_FILES = {
     "tools/public_surface.json",
 }
 NETWORK_MODULES = {"http", "httpx", "requests", "socket", "urllib"}
-NETWORK_RUNTIME_EXCEPTION = "keel-setup/scripts/verify_execute.py"
+NETWORK_RUNTIME_EXCEPTIONS = frozenset(
+    {
+        "keel-setup/scripts/authoring_context.py",
+        "keel-setup/scripts/verify_execute.py",
+    }
+)
 
 
 def _files() -> set[str]:
@@ -130,7 +137,7 @@ def _check_runtime_network_boundary() -> None:
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     imported.add(node.module.split(".", 1)[0])
             network = imported & NETWORK_MODULES
-            if network and relative != NETWORK_RUNTIME_EXCEPTION:
+            if network and relative not in NETWORK_RUNTIME_EXCEPTIONS:
                 raise ValueError(f"unexpected network import in {relative}: {sorted(network)}")
 
 

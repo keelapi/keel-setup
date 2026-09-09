@@ -99,10 +99,15 @@ The validator reads `reference/field-provenance.json`, a release-pinned machine 
 set and provenance values are checked against the published catalog. A report cannot promote a caller-
 or connector-asserted field to `trusted` by relabelling it.
 
-1. **Get the authoring profile.** Accept `basic` or `full` as an input. If it was not supplied,
-   ask once which authoring profile the dashboard shows, and wait for the answer before drafting.
-   Do not infer it from a plan name, fetch entitlements, request a credential, or call Keel to
-   discover it. This skill holds no Keel credential.
+1. **Get the authoring profile.** Accept `template`, `basic`, or `full` as an input. If it was
+   not supplied, ask once, and wait for the answer before drafting. Do not infer it from a plan
+   name, fetch entitlements, request a credential, or call Keel to discover it. This skill holds
+   no Keel credential.
+
+   There are three levels, not two. `template` accepts no custom authoring at all, so on that
+   level the honest answer is that a custom policy cannot be written here, not a draft that will
+   be rejected on save. Asking a two-option question about a three-state product produces a
+   confident wrong answer, so name all three or describe what the editor offers.
 
 2. **Gather evidence, opportunistically.** If the application's code or tool definitions are at
    hand, read them: which connectors and tools the agent actually calls, what the tool names
@@ -144,6 +149,10 @@ Never activate a policy yourself. Step 7 ends in a human decision, by design —
 
 ### Authoring profiles
 
+`template` authors nothing. Every field is non-authorable at this level, so a custom policy is
+not expressible. Say that plainly, offer the shipped templates, and do not produce a draft that
+exists only to be refused when the human tries to save it.
+
 `full` uses the complete bundled schema and the authorable fields in `reference/fields.md`.
 
 For `basic`, the document must satisfy the full schema **and** every restriction below:
@@ -169,6 +178,87 @@ For `basic`, the document must satisfy the full schema **and** every restriction
 Never emit an explicit `allow` rule for `basic`. It is terminal at this authoring level and can
 shadow later denies. This does not change the unmatched-action fallback: actions matching no
 terminal rule are still allowed by the engine default.
+
+## Facts you may not supply
+
+You know things about the world. Model prices, which models are cheap, which are deprecated,
+what a provider charges. **None of that is a Keel fact, and presenting it as one is the failure
+this section exists to prevent.**
+
+Three rules:
+
+1. **Never state a model's price, cost ranking, or availability from your own knowledge.** Not as
+   a table, not as an aside, not as "roughly". Keel maintains authoritative per-model rates with
+   a recorded confidence level; you do not have them unless they were given to you in this
+   conversation. If you have no authoritative rates, say the pricing information is not
+   available here and let the human supply it or decide without it.
+2. **Never convert what you observed during onboarding into what the customer wants.** The
+   allowed and denied models in a verification profile are **Keel's own test selection**, chosen
+   server-side to produce a deterministic proof. That a model was denied during onboarding is
+   not a decision the customer made about that model, and must never be described as one, or
+   used to keep a model out of a draft.
+3. **Separate what the application does from what the customer intends.** The model an
+   application currently requests is a source-inspected fact about the code. It is not a policy
+   preference, and it is not evidence the customer wants it permitted.
+
+The failure mode to watch for is confident arithmetic. A cost table with four decimal places
+built on numbers you recalled reads as evidence and is not. Where a fact would change the
+artifact and you do not have it, name the gap and stop — that is a complete answer.
+
+### "Only let it use the cheap models"
+
+A request phrased by price, with no authoritative price context available, is the recurring
+case. Handle it like this:
+
+- **Surface the ambiguity.** "Cheap" maps to at least two different controls: a list of
+  permitted models, or a limit on estimated cost. They protect differently and one of them is
+  weaker than its name (see *What the cost controls actually bound*).
+- **Prefer the model allowlist** when no authoritative pricing context is available.
+  `deny_if_model_not_in` gates on `model`, which Keel establishes itself, and it fails closed:
+  anything absent from the list is denied, including a model released tomorrow.
+- **Do not invent the set.** A "sensible cheap set" you assembled is a policy the customer never
+  chose, and they are the one who lives with it.
+- **Do not send them hunting.** Never ask the human to read model names or prices out of the
+  dashboard so you can use them. If you lack authoritative context, say which information is
+  missing and why it matters, rather than delegating the lookup.
+- **Stop at the real decision.** With the gap named, the remaining choice — which models, or
+  what limit — belongs to the human. Take an explicit delegation if they offer one, and say
+  exactly what you chose and on what basis.
+
+## What the cost controls actually bound
+
+`deny_if_cost_exceeds` is easy to describe more strongly than it behaves, and the two window
+kinds do not make the same promise. State the one that applies.
+
+**Windowed caps** — `daily`, `weekly`, `monthly`, `quarterly`. Keel tracks accumulated provider
+cost using reconciled actual usage for completed requests, and estimated exposure for requests
+still in flight. The historical part is what the provider actually charged, so the window
+self-corrects as requests complete.
+
+**Per-request caps** — `window: "request"`. Keel makes the decision before provider dispatch
+using a conservative cost estimate. There is no accumulated history to correct it, so the
+estimate is the whole basis of the decision.
+
+Both kinds share these properties, and all four are worth saying:
+
+- The decision is made **before the provider is called**, which is what lets a cost rule prevent
+  a call rather than merely record one.
+- The estimate prices both the input sent and the output allowed. Output exposure comes from the
+  **requested maximum output tokens, or a default maximum** when none is requested — a bound on
+  length, not a measurement of what the model will actually produce.
+- **Pricing unavailable is a denial, not a guess.** If Keel cannot resolve a price it denies the
+  request. Say this; it is the strongest true thing about the control.
+- **The final provider cost is not known until execution completes.** Actual cost can differ from
+  the estimate, and can exceed it.
+
+So `window: "request"` bounds an estimate for one request. Do not call it a spend cap, and do not
+say Keel knows what a request will cost before it runs. Do not call the estimate a maximum or a
+ceiling either: it is conservative on the output side, but nobody has established it as a true
+upper bound across every supported request shape, and "maximum" would promise exactly that.
+
+`constrain_max_output_tokens` is a **length control**. It caps how long a response may be, which
+narrows the range of possible costs, but it is not itself a cost control and does not make the
+final cost predictable. Offer it for what it does.
 
 ## What requires a user decision
 
@@ -431,6 +521,25 @@ however valid it is.
 The schema cannot check what depends on the user's project — their plan's authoring level, which
 fields their project may author, and whether a field is trustworthy enough to gate on. Keel
 decides those when the policy is saved.
+
+## When you cannot give them what they asked for
+
+Not expressible, not enforceable on this integration, not available at this authoring level.
+Order the response the same way every time:
+
+1. **Say what is possible first**, in their words. If a supported control gets part of the way,
+   name it before naming the limit. A limitation is easier to accept next to something that works.
+2. **Then say plainly what Keel cannot do**, without softening it into a maybe and without
+   offering a near-enough field as a substitute. Approximating an unsupported restriction
+   produces a document that cannot be observed failing, which is worse than no document.
+3. **Offer feedback only after alternatives are exhausted.** "Request this capability" is the
+   last option, not the first. Reaching for it early converts a solvable configuration question
+   into a support ticket.
+4. **Keep the technical detail behind an offer.** Field paths, provenance, enforceability
+   entries, and blocker classifications stay available on request. They do not lead.
+
+Never let a blocked request end on the block. It ends on a choice — even if the choice is to
+leave it as it is and revisit later.
 
 ## Presentation and handoff
 
