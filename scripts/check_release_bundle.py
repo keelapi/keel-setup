@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-09-09.1"
-PRODUCT_SOURCE_SHA256 = "abd52d7e61dcf7e7235eb7a8b2eaa66cd7529728d29c1493743a65d4c6b51b89"
+PUBLIC_RELEASE_VERSION = "2026-09-09.2"
+PRODUCT_SOURCE_SHA256 = "ceea4cb40aa613ab87fd8d25b71006031bedc4442699e3f51d86031a5814eeab"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -23,6 +23,9 @@ PUBLICATION_LAYER_FILES = [
     "scripts/check_release_bundle.py",
 ]
 EXPECTED_FILES = {
+    "keel-policy/scripts/consume_authoring_context.py",
+    "keel-policy/tests/test_authoring_context_consumption.py",
+
     ".github/workflows/ci.yml",
     ".gitignore",
     "LICENSE",
