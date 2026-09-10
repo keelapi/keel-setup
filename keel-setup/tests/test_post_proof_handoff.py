@@ -455,3 +455,26 @@ class PublicationModeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class OptionalNamedIdentityContractTest(unittest.TestCase):
+    def test_optional_identity_composes_existing_human_dashboard_path(self):
+        text = SKILL.read_text(encoding="utf-8")
+        block = _slice(text, "### Connect your application", "### Done for now")
+        for phrase in (
+            "Inside **B — Connect your application**", "**Named agent**", "**Project runtime**",
+            "legitimate permanent choice", "only the\nhuman chooses whether to register",
+            "Control → Authority → Connect an\nagent → Create agent and issue runtime key",
+            "do not call registration or setup-token redemption from the coding agent",
+            "Do not use Copy one-command setup", "prompt, stdout, argv, environment, repository files",
+            "Do not bind an existing shared project key", "Do not create grants, delegation, or compute parentage",
+            "If the state is unavailable, keep existing traffic unchanged",
+            "If authority is required and no live grant exists", "Stop the traffic switch",
+            "Never backfill generic-key Permit subjects", "does\nnot expand Basic authoring",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, block)
+
+
+if __name__ == "__main__":
+    unittest.main()

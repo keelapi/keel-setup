@@ -594,6 +594,52 @@ settle, and leave those open rather than closing them with a guess.
 
 ### Connect your application — separate, human-controlled runtime step
 
+Inside **B — Connect your application**, ask one optional identity choice before credential
+installation. Do not add a fourth post-proof option or change A — Make Keel yours.
+
+How should this application connect?
+
+- **Named agent** — Give it its own identity and Runtime credential. Future requests using that
+  credential can be attributed to it under Authority. Creating identity does not grant authority.
+- **Project runtime** — Keep project-level credentials. Requests remain governed without attribution
+  to a named Agent Principal. This is a legitimate permanent choice.
+
+Repository inspection may suggest a human-readable name (for example, Text Summarizer); only the
+human chooses whether to register it. Observation, repository names, User-Agent, processes, CI jobs,
+and coding assistants never establish identity. If the human chooses Project runtime, do not
+register a principal, bind a shared key, or keep prompting them to become a named agent.
+
+If the human explicitly chooses Named agent, direct them to **Control → Authority → Connect an
+agent → Create agent and issue runtime key**. Reuse the existing dashboard flow in the human's
+browser; do not call registration or setup-token redemption from the coding agent. Do not use Copy one-command setup for this journey. Both the setup token and Runtime key stay out of the
+coding-agent prompt, stdout, argv, environment, repository files, and generated configuration.
+The human installs the newly issued key in the application's separate runtime/secret store.
+Do not bind an existing shared project key. Do not create grants, delegation, or compute parentage;
+Claude/Codex doing setup is never a reason to record a parent agent.
+
+Before switching real traffic, have the human check the current **Agent-specific authority required**
+state in Authority, which is derived from the same effective enforcement helper as Permit issuance.
+Do not infer this requirement from a plan, identity label, or a default mode.
+If the state is unavailable, keep existing traffic unchanged until the requirement can be checked.
+If authority is required and no live grant exists, explain:
+
+The agent now has an identity, but this project requires named agents to have explicit authority
+before they can act. Keep existing application traffic unchanged. Configuring authority is a
+separate human-reviewed step.
+
+Stop the traffic switch there unless the human separately chooses to configure authority; do not
+create a grant, lower protection, change policy, or switch enforcement mode to clear the denial.
+Registration remains successful. If no additional authority is required, continue the existing
+human-controlled runtime installation below; other policies and enforcement still apply.
+
+For an existing customer changing credentials, explain only when relevant: Future requests using
+this agent's credential will be attributed to it. Earlier project-level requests remain unchanged
+because Keel cannot retroactively prove who made them. Never backfill generic-key Permit subjects.
+
+Named identity provides attribution, a principal-bound credential, and Authority visibility. It does
+not expand Basic authoring: do not promise agent-specific Basic policy rules or introduce
+`context._keel.verified_agent_principal_id` into the Basic field set.
+
 Only when the human chooses this step, help them install the Runtime key in the application's real
 runtime or secret manager outside the conversation. Do not request the key, read secret files, inject
 it into the coding-agent environment, or require a Codex restart, shell-profile edit, or environment
