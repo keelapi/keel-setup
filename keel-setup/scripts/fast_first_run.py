@@ -475,26 +475,23 @@ def _keel_read_json(response: Any) -> dict[str, Any]:
     return body
 
 
-def _keel_openai_output_text(body: dict[str, Any]) -> str:
-    provider_output = body.get("output")
-    if not isinstance(provider_output, dict):
-        raise RuntimeError("Keel returned an invalid provider response.")
-    convenience = provider_output.get("output_text")
-    if isinstance(convenience, str):
-        return convenience.strip()
-    output = provider_output.get("output")
-    if not isinstance(output, list):
-        raise RuntimeError("Keel returned an invalid provider response.")
+def _keel_output_text(body: dict[str, Any]) -> str:
+    output = body.get("output")
+    if not isinstance(output, dict):
+        raise RuntimeError("Keel returned an invalid normalized response.")
+    content = output.get("content")
+    if not isinstance(content, list) or not content:
+        raise RuntimeError("Keel returned an invalid normalized response.")
     parts: list[str] = []
-    for item in output:
-        if not isinstance(item, dict) or item.get("type") != "message":
-            continue
-        content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        for part in content:
-            if isinstance(part, dict) and part.get("type") == "output_text" and isinstance(part.get("text"), str):
-                parts.append(part["text"])
+    for block in content:
+        if (
+            not isinstance(block, dict)
+            or block.get("type") != "text"
+            or block.get("role") != "assistant"
+            or not isinstance(block.get("text"), str)
+        ):
+            raise RuntimeError("Keel returned an invalid normalized response.")
+        parts.append(block["text"])
     return "".join(parts).strip()
 '''
 
@@ -505,7 +502,7 @@ def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | N
     tree = ast.parse(source)
     reserved = {
         "KEEL_EXECUTE_URL", "KEEL_MAX_RESPONSE_BYTES", "KEEL_REQUEST_TIMEOUT_SECONDS",
-        "_KeelNoRedirectHandler", "_keel_read_json", "_keel_openai_output_text",
+        "_KeelNoRedirectHandler", "_keel_read_json", "_keel_output_text",
     }
     top_names = {
         node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
@@ -569,7 +566,7 @@ def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | N
             "        or governance.get(\"decision\") != \"allow\"",
             "    ):",
             "        raise RuntimeError(\"Keel did not complete the request.\")",
-            "    summary = _keel_openai_output_text(body)",
+            "    summary = _keel_output_text(body)",
             *suffix,
             "",
         ]
@@ -610,12 +607,18 @@ from {module} import MAX_INPUT_CHARACTERS, {seam.symbol}
 
 
 class FakeResponse:
-    def __init__(self, output_text: str = "A short summary.") -> None:
+    def __init__(self, text: str = "A short summary.") -> None:
         self.status = 200
         self._body = json.dumps({{
             "status": "completed",
             "governance": {{"decision": "allow"}},
-            "output": {{"output_text": output_text}},
+            "output": {{
+                "content": [{{
+                    "type": "text",
+                    "role": "assistant",
+                    "text": text,
+                }}],
+            }},
         }}).encode()
 
     def read(self, _limit: int = -1) -> bytes:
@@ -629,13 +632,13 @@ class FakeResponse:
 
 
 class FakeClient:
-    def __init__(self, output_text: str = "A short summary.") -> None:
-        self.output_text = output_text
+    def __init__(self, text: str = "A short summary.") -> None:
+        self.text = text
         self.calls: list[object] = []
 
     def open(self, request: object, *, timeout: int) -> FakeResponse:
         self.calls.append(request)
-        return FakeResponse(self.output_text)
+        return FakeResponse(self.text)
 
 
 class SummarizerTests(unittest.TestCase):

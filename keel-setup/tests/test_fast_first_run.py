@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -148,6 +149,97 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
             result["validation"]["focused_compatibility_test"],
             "tests.test_app.SummarizerTests.test_sends_text_to_the_selected_model",
         )
+
+    def test_regression_generated_adapter_accepts_normalized_execute_text(self):
+        root = self._repo()
+        result = self._run(root)
+
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        completed = subprocess.run(
+            [sys.executable, "-m", "unittest", "tests.test_app"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "KEEL_API_KEY": "must-not-be-used-by-the-fixture"},
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Ran 4 tests", completed.stderr)
+
+    def test_generated_fixture_uses_exact_normalized_execute_response_shape(self):
+        root = self._repo()
+        result = self._run(root)
+        generated_test = (root / "tests" / "test_app.py").read_text(encoding="utf-8")
+
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertIn('"output": {', generated_test)
+        self.assertIn('"content": [{', generated_test)
+        self.assertIn('"type": "text"', generated_test)
+        self.assertIn('"role": "assistant"', generated_test)
+        self.assertIn('"text": text', generated_test)
+        self.assertNotIn('"output_text"', generated_test)
+        self.assertNotIn('"type": "message"', generated_test)
+
+    def test_generated_parser_rejects_provider_native_and_malformed_output_shapes(self):
+        namespace: dict[str, object] = {}
+        exec(
+            "import json\nimport urllib.error\nimport urllib.request\nfrom typing import Any\n"
+            + fast._adapter_support(),
+            namespace,
+        )
+        parser = namespace["_keel_output_text"]
+        invalid_outputs = (
+            {"output_text": "provider convenience field"},
+            {"output": [{"type": "message", "content": []}]},
+            {"content": []},
+            {"content": [None]},
+            {"content": [{"type": "output_text", "role": "assistant", "text": "wrong type"}]},
+            {"content": [{"type": "text", "role": "user", "text": "wrong role"}]},
+            {"content": [{"type": "text", "role": "assistant", "text": 42}]},
+        )
+
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                with self.assertRaisesRegex(RuntimeError, "invalid normalized response"):
+                    parser({"output": output})
+
+    def test_generated_parser_accepts_only_well_formed_normalized_text_blocks(self):
+        namespace: dict[str, object] = {}
+        exec(
+            "import json\nimport urllib.error\nimport urllib.request\nfrom typing import Any\n"
+            + fast._adapter_support(),
+            namespace,
+        )
+        parser = namespace["_keel_output_text"]
+        body = {
+            "output": {
+                "content": [
+                    {"type": "text", "role": "assistant", "text": "The answer "},
+                    {"type": "text", "role": "assistant", "text": "is 42."},
+                ]
+            }
+        }
+
+        self.assertEqual(parser(body), "The answer is 42.")
+
+    def test_generated_reader_preserves_response_size_bound(self):
+        namespace: dict[str, object] = {}
+        exec(
+            "import json\nimport urllib.error\nimport urllib.request\nfrom typing import Any\n"
+            + fast._adapter_support(),
+            namespace,
+        )
+        limit = namespace["KEEL_MAX_RESPONSE_BYTES"]
+
+        class OversizedResponse:
+            def read(self, requested: int) -> bytes:
+                self.requested = requested
+                return b"x" * requested
+
+        response = OversizedResponse()
+        with self.assertRaisesRegex(RuntimeError, "oversized response"):
+            namespace["_keel_read_json"](response)
+        self.assertEqual(response.requested, limit + 1)
 
     def test_retained_if_else_block_is_copied_verbatim_and_compiles(self):
         root = self._repo(fixtures.RETAINED_IF_ELSE_APP)
