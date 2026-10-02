@@ -161,19 +161,19 @@ For `basic`, the document must satisfy the full schema **and** every restriction
 
 - at most 10 rules;
 - only `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, and `contains` operators;
-- only `model`, `provider`, `estimated_cost_usd_micros`,
-  `context.provider_meta.region`, `context.provider_meta.data_retention`,
-  `context._keel.request_hour_utc`, and `context._keel.request_day_of_week` fields.
+- only `model`, `provider`, `estimated_cost_usd_micros`, `token_estimate`,
+  `context.provider_meta.region`, `context.provider_meta.data_retention`, and
+  `context._keel.request_hour_utc` fields.
   Every one is `keel_derived`, so a `basic` policy never gates on a caller-asserted
-  fact. `request_hour_utc` is an hour 0-23 in **UTC**, and `request_day_of_week` is
-  0-6 with Monday as 0 — a local-time restriction has to be converted before it is
-  written. There is no prompt-token field at this profile: `token_estimate` counts
-  input plus output, and `attrs.estimated_input_tokens` is caller-asserted, so
-  neither is a substitute;
+  fact. `request_hour_utc` is an hour 0-23 in **UTC**; convert a local-time
+  restriction before writing it. `token_estimate` counts input plus output and
+  cannot stand in for prompt-only tokens. `attrs.estimated_input_tokens` is
+  caller-asserted and unavailable at this profile;
 - each condition is one leaf, or one top-level `all`/`any` containing leaves only; no nesting
   and no `not`;
-- actions are limited to the schema's deny family (`deny` and `deny_if_*`),
-  `constrain_max_output_tokens`, and `require_human_review`; and
+- actions are limited to `deny`, `deny_if_cost_exceeds`, `deny_if_rate_exceeds`,
+  `deny_if_spike_detected`, `deny_if_model_not_in`, `constrain_max_output_tokens`,
+  and `require_human_review`; and
 - when the schema's `require_attestation` property is present, its `attestor` must be exactly
   `project_owner`. Its required `timeout_seconds` is still a user decision under invariant 3.
 

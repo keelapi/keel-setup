@@ -466,6 +466,16 @@ classification list, correlation identifier, coverage report, or local-state com
 
 Keel used your first policy for this test.
 
+**Stay connected with Keel**
+
+Ask questions, share feedback, and hear what we're building next.
+
+**[Join the Keel Slack · Talk directly with the Keel team](https://join.slack.com/t/keel-rsh2729/shared_invite/zt-4b8kk23mc-aivLoo7uiFYPQwP6AkQmfQ)**
+
+Follow along: [X](https://x.com/KeelAPIHQ) · [LinkedIn](https://www.linkedin.com/company/keelapi/)
+
+Questions or feedback? We're listening.
+
 **Now make it yours.** What would you like to do next?
 
 **A — Make Keel yours.** I can inspect this app and help you decide what should run freely, need
@@ -491,6 +501,9 @@ default: no `request_id`, `permit_id`, `http_status`, `body_status`, `error_stag
 write or imply that the application is protected, covered, deployed, verified end to end, or free of
 bypasses, and never say Keel or this skill turned the policy on. Offer the three choices and wait; the
 success response is not a policy interview.
+
+The stay-connected invitation belongs only in this successful proof block. It must not appear at a
+human gate or after a failed or ambiguous proof. Use the official Slack invite in the successful proof block.
 
 ### `verification details` — the technical layer
 

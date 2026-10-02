@@ -1,6 +1,6 @@
 # Authorable field vocabulary
 
-Generated from the Keel policy-authoring catalog, version `2026-08-14.1`. The catalog is the
+Generated from the Keel policy-authoring catalog, version `2026-09-12.1`. The catalog is the
 table below. The guidance around it is maintained by hand and does **not** regenerate with the
 table — re-apply it if you regenerate.
 
@@ -127,7 +127,7 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 | `attrs.model` | string | yes | caller_asserted |
 | `attrs.operation` | enum | yes | caller_asserted |
 | `attrs.provider` | string | yes | caller_asserted |
-| `budget_envelope_id` | uuid | yes | keel_derived |
+| `budget_envelope_id` | uuid | yes | caller_asserted |
 | `context._keel.action_access_confidence` | enum | no | keel_derived |
 | `context._keel.action_access_level` | enum | yes | keel_derived |
 | `context._keel.action_access_map_version` | string | no | keel_derived |
@@ -158,7 +158,8 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 | `context._keel.connector_identity` | string | no | keel_derived |
 | `context._keel.intent_mismatch` | boolean | yes | keel_derived |
 | `context._keel.payment_action_verified` | boolean | yes | keel_derived |
-| `context._keel.payment_amount_usd_micros` ‡ | integer | yes | keel_derived |
+| `context._keel.payment_amount_usd_micros` ‡ | integer | yes | caller_asserted |
+| `context._keel.payment_fact_trust` | enum | yes | keel_derived |
 | `context._keel.project_plan` | enum | yes | keel_derived |
 | `context._keel.request_day_of_week` | integer | yes | keel_derived |
 | `context._keel.request_hour_utc` | integer | yes | keel_derived |
@@ -174,10 +175,16 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 | `token_estimate` | integer | yes | keel_derived |
 
 ‡ `context._keel.payment_amount_usd_micros` is the **flat** spelling of the same number as
-`action_envelope.financial.amount_usd_micros.value`, and the catalog still declares it
-`keel_derived`. That claim was corrected on the envelope field and not on this one, so the two
-disagree about one value. It also has no companion `.state`, so the absence rule below cannot
-be expressed with it. Prefer the envelope pair.
+`action_envelope.financial.amount_usd_micros.value`. Its weakest source is the canonical
+Permit payment rail's caller-declared, dispatch-bound amount. Read the server-stamped
+`context._keel.payment_fact_trust` value: `work_authority_bound`, `keel_verified`,
+`request_bound`, or `unavailable`. None of these values proves provider completion. The flat
+amount still has no companion `.state`; prefer the envelope pair when an absence guard matters.
+
+`budget_envelope_id` is selected by the caller and enters policy evaluation before Keel
+resolves and reserves the project-scoped envelope on the allow path. A condition on the ID is
+not proof that a reservation succeeded. The flat payment currency field remains unpublished:
+its absence semantics are not represented by a companion state in this reference.
 
 ## Operators
 

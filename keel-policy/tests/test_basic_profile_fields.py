@@ -81,10 +81,10 @@ BASIC_FIELDS = (
     "model",
     "provider",
     "estimated_cost_usd_micros",
+    "token_estimate",
     "context.provider_meta.region",
     "context.provider_meta.data_retention",
     "context._keel.request_hour_utc",
-    "context._keel.request_day_of_week",
 )
 
 REMOVED_FIELDS = (
@@ -99,7 +99,6 @@ BASIC_ACTIONS = (
     "deny",
     "deny_if_cost_exceeds",
     "deny_if_model_not_in",
-    "deny_if_projected_monthly_ratio_exceeds",
     "deny_if_rate_exceeds",
     "deny_if_spike_detected",
     "constrain_max_output_tokens",
@@ -188,7 +187,7 @@ class BasicWhitelistDriftTest(unittest.TestCase):
     def test_utc_semantics_are_stated_not_left_implicit(self):
         section = _basic_section()
         self.assertIn("UTC", section)
-        self.assertIn("Monday as 0", section)
+        self.assertIn("hour 0-23", section)
 
 
 class RepresentativeBasicPolicyTest(unittest.TestCase):
@@ -204,6 +203,9 @@ class RepresentativeBasicPolicyTest(unittest.TestCase):
             "estimated_cost_usd_micros": {
                 "field": "estimated_cost_usd_micros", "op": "gt", "value": 100000000
             },
+            "token_estimate": {
+                "field": "token_estimate", "op": "gt", "value": 1000
+            },
             "context.provider_meta.region": {
                 "field": "context.provider_meta.region", "op": "neq", "value": "us-east-1"
             },
@@ -212,9 +214,6 @@ class RepresentativeBasicPolicyTest(unittest.TestCase):
             },
             "context._keel.request_hour_utc": {
                 "field": "context._keel.request_hour_utc", "op": "gte", "value": 22
-            },
-            "context._keel.request_day_of_week": {
-                "field": "context._keel.request_day_of_week", "op": "in", "value": [5, 6]
             },
         }
         self.assertEqual(set(samples), set(BASIC_FIELDS))
@@ -226,14 +225,14 @@ class RepresentativeBasicPolicyTest(unittest.TestCase):
             self.assertEqual(self._validate(document), [], f"{field} rule failed validation")
 
     def test_composed_basic_policy_within_profile_limits_validates(self):
-        """Business-hours restriction — the shape that replaces time_of_day."""
+        """UTC-hour restriction using fields admitted by the API Basic validator."""
         document = {
-            "name": "Review costly weekend requests",
+            "name": "Review costly requests outside working hours",
             "rules": [
                 {
                     "if": {
                         "all": [
-                            {"field": "context._keel.request_day_of_week", "op": "in", "value": [5, 6]},
+                            {"field": "context._keel.request_hour_utc", "op": "gte", "value": 22},
                             {"field": "estimated_cost_usd_micros", "op": "gt", "value": 50000000},
                         ]
                     },
