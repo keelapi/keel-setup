@@ -109,6 +109,24 @@ class PostProofSuccessDefaultTest(unittest.TestCase):
         self.assertLess(make_yours, connect)
         self.assertLess(connect, done)
 
+    def test_stay_connected_is_optional_and_only_after_success(self):
+        self.assertLess(self.block.index("✓ A blocked request was stopped by Keel"),
+                        self.block.index("**Stay connected with Keel**"))
+        self.assertLess(self.block.index("**Stay connected with Keel**"),
+                        self.block.index("**Now make it yours.**"))
+        self.assertIn(
+            "**[Join the Keel Slack · Talk directly with the Keel team]"
+            "(https://join.slack.com/t/keel-rsh2729/shared_invite/"
+            "zt-4b8kk23mc-aivLoo7uiFYPQwP6AkQmfQ)**",
+            self.block,
+        )
+        self.assertNotIn("invite link not yet available", self.block)
+        self.assertIn("[X](https://x.com/KeelAPIHQ)", self.block)
+        self.assertIn("[LinkedIn](https://www.linkedin.com/company/keelapi/)", self.block)
+        guidance = _slice(self.skill, "The stay-connected invitation belongs", "### `verification details`")
+        self.assertIn("must not appear at a\nhuman gate or after a failed or ambiguous proof", guidance)
+        self.assertIn("Use the official Slack invite in the successful proof block", guidance)
+
     def test_default_response_offers_the_technical_layer_without_showing_it(self):
         self.assertIn(
             "Ask for `verification details` if you want the technical evidence.", self.block

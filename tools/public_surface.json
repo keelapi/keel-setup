@@ -70,6 +70,7 @@
       "context._keel.intent_mismatch",
       "context._keel.payment_action_verified",
       "context._keel.payment_amount_usd_micros",
+      "context._keel.payment_fact_trust",
       "context._keel.project_plan",
       "context._keel.request_day_of_week",
       "context._keel.request_hour_utc",
