@@ -53,8 +53,7 @@ are the only normal pre-gate sources. Fetching the exact pinned Git object is al
 or a required bundled file cannot be read and verified, stop rather than searching for substitute
 instructions, current examples, provider documentation, or model names.
 
-For model execution, deterministic proof remains only `POST /v1/execute`; never introduce or preserve
-`/v1/proxy/*`. An eligible consequential MCP execution is governed only when dispatched through the
+For this setup workflow, deterministic proof remains only `POST /v1/execute`. Model proxy routes remain available for text model calls without tool definitions, with required per-request freshness headers. This bounded setup does not introduce proxy wiring or rewrite already-managed proxy paths; their presence is a separate existing integration, not deprecation. An eligible consequential MCP execution is governed only when dispatched through the
 managed MCP `:call` path. MCP `:decide` and `:prepare` are not execution.
 
 ## Lifecycle

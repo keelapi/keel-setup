@@ -1,6 +1,6 @@
 # Keel setup
 
-This is Keel's public, release-only bundle for agent-assisted onboarding. It contains the two skills a
+This checkout is an unpublished repair candidate for Keel's public, release-only bundle for agent-assisted onboarding. It contains the two skills a
 coding agent needs to inspect an application, prepare a bounded Keel integration, and help a human
 author a friendly policy without taking authority from that human.
 

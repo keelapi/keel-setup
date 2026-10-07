@@ -571,12 +571,21 @@ happened yet."""
         self.assertIn("machine-readable `does_not_establish`", final_handoff)
         self.assertIn("Also found, not governed", final_handoff)
 
+    def test_managed_proxy_is_current_but_not_rewritten_by_this_execute_setup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            _write_openai_seam(root / "server.py", base_url="https://api.keelapi.com/v1/proxy/openai")
+            result = inventory.fast_inspect(root)
+        self.assertNotIn("deprecated /v1/proxy", json.dumps(result))
+        self.assertIn("already-managed proxy path", json.dumps(result))
+        self.assertIn("Model proxy routes remain available", SKILL.read_text())
+
     def test_skill_retains_execution_and_authority_boundaries(self):
         text = SKILL.read_text(encoding="utf-8")
 
         for required in (
             "deterministic proof remains only `POST /v1/execute`",
-            "never introduce or preserve\n`/v1/proxy/*`",
+            "does not introduce proxy wiring or rewrite already-managed proxy paths",
             "managed MCP `:call` path",
             "MCP `:decide` and `:prepare` are not execution",
             "Never mint, exchange, or install it on their behalf",

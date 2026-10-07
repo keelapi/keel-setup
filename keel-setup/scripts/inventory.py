@@ -259,7 +259,7 @@ def _python_candidates(path: pathlib.Path, relative: pathlib.PurePath) -> list[d
         if streaming:
             reasons.append("streaming is not supported by the pinned /v1/execute contract")
         if "/v1/proxy/" in source:
-            reasons.append("the same file contains a deprecated /v1/proxy/ path")
+            reasons.append("the same file contains an already-managed proxy path outside this bounded /v1/execute setup")
         exclusion = _selection_exclusion(relative)
         candidates.append(
             {
@@ -309,7 +309,7 @@ def _javascript_candidates(path: pathlib.Path, relative: pathlib.PurePath) -> li
             if re.search(r"\bstream\s*:\s*(?!false\b)", window):
                 reasons.append("streaming is not supported by the pinned /v1/execute contract")
             if "/v1/proxy/" in source:
-                reasons.append("the same file contains a deprecated /v1/proxy/ path")
+                reasons.append("the same file contains an already-managed proxy path outside this bounded /v1/execute setup")
             exclusion = _selection_exclusion(relative)
             candidates.append(
                 {
