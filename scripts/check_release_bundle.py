@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-10-07.1-rc"
-PRODUCT_SOURCE_SHA256 = "6ae24cbe0eb9d52151fd09cd535045ad6e8793b68384ae59ead2f3bd97f82394"
+PUBLIC_RELEASE_VERSION = "2026-10-19.1-rc"
+PRODUCT_SOURCE_SHA256 = "be9eda7cf7cd8bea88473493901a649baad9a6faa4bfe0bb2b98573122f16dfb"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -23,6 +23,11 @@ PUBLICATION_LAYER_FILES = [
     "scripts/check_release_bundle.py",
 ]
 EXPECTED_FILES = {
+    'keel-setup/reference/integration_profiles.v1.json',
+    'keel-setup/reference/voice-gateway.md',
+    'keel-setup/scripts/prepare_voice.py',
+    'keel-setup/tests/test_prepare_voice.py',
+
     "keel-policy/scripts/consume_authoring_context.py",
     "keel-policy/tests/test_authoring_context_consumption.py",
 
