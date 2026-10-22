@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_RELEASE_VERSION = "2026-10-19.1-rc"
+PUBLIC_RELEASE_VERSION = "2026-10-22.1"
 PRODUCT_SOURCE_SHA256 = "be9eda7cf7cd8bea88473493901a649baad9a6faa4bfe0bb2b98573122f16dfb"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
