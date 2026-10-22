@@ -30,6 +30,29 @@ Keel is an authorization boundary, not an agent runtime. This WP10 skill establi
 deterministic allowed request completes and an intended denied request is stopped before provider
 dispatch through `POST /v1/execute`. Action Mapping and state F are not implemented by this skill.
 
+## Choose the workflow first
+
+Establish what the customer wants to govern: AI model spending, consequential business tools,
+or live voice. Reuse an explicit choice already present in the request. When it is absent, ask one
+short choice before selecting a setup path. Do not infer the customer's policy or legal choices.
+
+- **AI model spending:** use the existing deterministic state-D flow below.
+- **Business tools:** inspect the concrete action and the managed MCP `:call` execution boundary;
+  use the policy skill to prepare restrictions and disclose unsupported or unverified actions.
+  A text-model proof does not qualify a business effect.
+- **Live voice:** follow [the voice preparation contract](reference/voice-gateway.md), read
+  `reference/integration_profiles.v1.json`, and use `scripts/prepare_voice.py` from the verified
+  immutable bundle. Skip the text-only Fast First Run orchestrator. Prepare consent, customer
+  gateway custody, signing identity, management-bound runtime key and the closed tool catalog.
+  This path currently produces **preparation only**, with provider acceptance and certification
+  unresolved. It never activates a voice profile or claims a live test passed.
+
+For ElevenLabs, distinguish Direct TTS/STT requests from Agents conversations. A Direct connector
+key enables only the operation-specific hosted request path. It neither attaches an Agents agent
+nor provides realtime conversation, action enforcement, or lawful processing by itself. Native
+Agents credentials stay in the customer's gateway. Choose the profile by transport and enforcement
+boundary, rather than treating a model or provider name as a support guarantee.
+
 ## Capability and release trust gate
 
 Setup requires repository and terminal access. If either is unavailable, stop and tell the human to

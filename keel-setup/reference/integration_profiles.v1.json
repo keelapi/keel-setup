@@ -1,0 +1,80 @@
+{
+  "version": "keel.integration_profiles.v1",
+  "qualification_status": "unqualified",
+  "customer_activation": "human_owned",
+  "profiles": [
+    {
+      "id": "elevenlabs_direct_audio_v1",
+      "label": "ElevenLabs Direct audio",
+      "provider": "elevenlabs",
+      "transport": "https",
+      "operations": [
+        "generate.audio",
+        "transcribe.audio"
+      ],
+      "credential_custody": "keel_connector",
+      "media_path": "submitted_text_or_audio_passes_through_keel",
+      "readiness": "requires_operation_and_pricing_qualification"
+    },
+    {
+      "id": "openai_realtime_gateway_ws_v1",
+      "label": "OpenAI Realtime customer gateway",
+      "provider": "openai",
+      "transport": "customer_gateway_websocket",
+      "operations": [
+        "realtime.session",
+        "managed_mcp_tools"
+      ],
+      "credential_custody": "customer_gateway",
+      "media_path": "customer_to_provider",
+      "readiness": "preparation_only"
+    },
+    {
+      "id": "elevenlabs_agents_gateway_ws_v1",
+      "label": "ElevenLabs Agents customer gateway",
+      "provider": "elevenlabs",
+      "transport": "customer_gateway_websocket",
+      "operations": [
+        "realtime.session",
+        "managed_mcp_tools"
+      ],
+      "credential_custody": "customer_gateway",
+      "media_path": "customer_to_provider",
+      "readiness": "preparation_only"
+    },
+    {
+      "id": "openai_realtime_broker_webrtc_v1",
+      "label": "OpenAI Realtime broker reference",
+      "provider": "openai",
+      "transport": "brokered_webrtc",
+      "operations": [
+        "realtime.session",
+        "managed_mcp_tools"
+      ],
+      "credential_custody": "customer_gateway",
+      "media_path": "customer_to_provider",
+      "readiness": "reference_requires_live_qualification"
+    },
+    {
+      "id": "elevenlabs_agents_webrtc_v1",
+      "label": "ElevenLabs Agents direct WebRTC",
+      "provider": "elevenlabs",
+      "transport": "webrtc",
+      "operations": [],
+      "credential_custody": "customer_gateway",
+      "media_path": "customer_to_provider",
+      "readiness": "unsupported_unqualified"
+    }
+  ],
+  "voice_gates": [
+    "customer_privacy_profile",
+    "consent_before_capture",
+    "management_bound_runtime_key",
+    "stable_enrolled_signing_key",
+    "closed_verified_tool_catalog",
+    "qualified_pricing_admission",
+    "provider_sandbox_acceptance",
+    "counsel_before_real_person_audio",
+    "human_production_activation"
+  ]
+}
