@@ -95,6 +95,60 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
     def _run(self, root: pathlib.Path) -> dict[str, object]:
         return fast.run_pipeline(self.bundle, self.bundle_sha, root)
 
+    def test_nested_bundle_is_rejected_before_checker_or_helper_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = pathlib.Path(temporary) / "release"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(parent))
+            _git(parent, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            (parent / ".git/info/exclude").write_text(".worktrees/\n", encoding="utf-8")
+            child = parent / ".worktrees/fake"
+            (child / "scripts").mkdir(parents=True)
+            marker = pathlib.Path(temporary) / "checker-ran"
+            (child / "scripts/check_release_bundle.py").write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+                "print('PASS: public setup bundle (fake)')\n", encoding="utf-8",
+            )
+            shutil.copy2(parent / "SOURCE.json", child / "SOURCE.json")
+            alias = pathlib.Path(temporary) / "child-alias"
+            alias.symlink_to(child, target_is_directory=True)
+            self.assertEqual(_git(child, "rev-parse", "HEAD"), self.bundle_sha)
+            self.assertEqual(_git(child, "status", "--porcelain=v1", "--untracked-files=all"), "")
+            for selected in (child, alias, child / "scripts/.."):
+                with self.subTest(selected=selected):
+                    with self.assertRaisesRegex(fast.PipelineFailure, "worktree root"):
+                        fast.verify_release(selected, self.bundle_sha)
+                    with mock.patch.object(fast, "_load_module") as load:
+                        result = fast.run_pipeline(selected, self.bundle_sha, parent)
+                    self.assertEqual(result["outcome"], "untrusted_bundle", result)
+                    load.assert_not_called()
+                    self.assertFalse(marker.exists())
+
+    def test_release_root_aliases_remain_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            alias = pathlib.Path(temporary) / "release-alias"
+            alias.symlink_to(self.bundle, target_is_directory=True)
+            relative = pathlib.Path(os.path.relpath(self.bundle))
+            for selected in (self.bundle, alias, relative):
+                with self.subTest(selected=selected):
+                    self.assertEqual(fast.verify_release(selected, self.bundle_sha)["status"], "trusted")
+
+    def test_linked_worktree_root_remains_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = pathlib.Path(temporary) / "release"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(parent))
+            _git(parent, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            worktree = pathlib.Path(temporary) / "linked"
+            _git(parent, "worktree", "add", "--detach", str(worktree), self.bundle_sha)
+            self.assertTrue((worktree / ".git").is_file())
+            self.assertEqual(fast.verify_release(worktree, self.bundle_sha)["status"], "trusted")
+
+    def test_release_root_with_trailing_whitespace_remains_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary) / "release \n"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(root))
+            _git(root, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            self.assertEqual(fast.verify_release(root, self.bundle_sha)["status"], "trusted")
+
     def test_trivial_openai_responses_summarizer_is_ready_for_human(self):
         root = self._repo()
         result = self._run(root)

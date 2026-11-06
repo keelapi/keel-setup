@@ -124,11 +124,11 @@ def _run(
         raise PipelineFailure("validation_failed", f"bounded command failed: {argv[0]}: {exc}") from exc
 
 
-def _git(repo: pathlib.Path, *args: str, timeout: int = 10) -> str:
+def _git(repo: pathlib.Path, *args: str, timeout: int = 10, path_output: bool = False) -> str:
     result = _run(["git", "-C", str(repo), *args], cwd=repo, timeout=timeout)
     if result.returncode != 0:
         raise PipelineFailure("validation_failed", f"git {' '.join(args)} failed")
-    return result.stdout.strip()
+    return result.stdout.removesuffix("\n") if path_output else result.stdout.strip()
 
 
 def _load_module(name: str, path: pathlib.Path):
@@ -147,6 +147,12 @@ def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
         raise PipelineFailure("untrusted_bundle", "bundle SHA must be 40 lowercase hexadecimal characters")
     if not bundle.is_dir():
         raise PipelineFailure("untrusted_bundle", "bundle path is not a directory")
+    bundle = bundle.resolve()
+    # Git discovers enclosing repositories; bind its facts to the directory
+    # supplying executable bundle files before inspecting or running those files.
+    worktree_root = pathlib.Path(_git(bundle, "rev-parse", "--show-toplevel", path_output=True)).resolve()
+    if bundle != worktree_root:
+        raise PipelineFailure("untrusted_bundle", "bundle path must be the Git worktree root")
     head = _git(bundle, "rev-parse", "HEAD")
     if head != expected_sha:
         raise PipelineFailure("untrusted_bundle", "bundle checkout does not match the requested immutable SHA")
@@ -894,6 +900,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
     originals: dict[pathlib.PurePosixPath, bytes | None] = {}
     edited = False
     try:
+        bundle = bundle.resolve()
         mark = time.perf_counter()
         trust = verify_release(bundle, bundle_sha)
         timings["release_trust_ms"] = round((time.perf_counter() - mark) * 1000, 3)
