@@ -722,7 +722,7 @@ class SourceCustodyTest(unittest.TestCase):
     def test_helper_is_standard_library_only(self):
         allowed = {
             "__future__", "argparse", "decimal", "getpass", "importlib", "json",
-            "pathlib", "re", "secrets", "sys", "time", "urllib", "warnings", "typing",
+            "pathlib", "re", "secrets", "subprocess", "sys", "time", "urllib", "warnings", "typing",
         }
         imports = [
             line.strip()
@@ -756,8 +756,14 @@ class SourceCustodyTest(unittest.TestCase):
         for verb in ('"POST"', '"PUT"', '"PATCH"', '"DELETE"'):
             self.assertNotIn(verb, self.source)
 
-    def test_helper_starts_no_subprocess(self):
-        self.assertNotIn("subprocess", self.source)
+    def test_subprocess_is_confined_to_read_only_release_gate(self):
+        gate = self.source.split("def _verify_pinned_release(", 1)[1].split(
+            "def _read_hidden_runtime_key", 1
+        )[0]
+        self.assertEqual(self.source.count("subprocess.run("), 1)
+        self.assertIn("subprocess.run(", gate)
+        self.assertIn('"--no-replace-objects"', gate)
+        self.assertNotIn("exec_module", self.source)
 
 
 

@@ -10,12 +10,12 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 import getpass
-import importlib.util
 import json
 import os
 import pathlib
 import re
 import secrets
+import subprocess
 import sys
 import time
 import urllib.error
@@ -137,25 +137,71 @@ def _contains_secret_argument(argv: list[str]) -> bool:
 
 
 def _verify_pinned_release(bundle_sha: str) -> None:
-    """Run the existing public release verifier before accepting a credential."""
+    """Authenticate bundle data against the caller's pin without executing it.
+
+    Keep this gate in each credential entrypoint: importing a sibling to decide
+    whether that sibling is trusted would run its code before authentication.
+    The entrypoint and the caller-supplied commit pin are the trust anchors.
+    """
 
     try:
+        if re.fullmatch(r"[0-9a-f]{40}", bundle_sha) is None:
+            raise ValueError("invalid bundle SHA")
         bundle = pathlib.Path(__file__).resolve().parents[2]
-        helper_path = bundle / "keel-setup" / "scripts" / "fast_first_run.py"
-        spec = importlib.util.spec_from_file_location("keel_release_verifier", helper_path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("pinned release verifier is unavailable")
-        module = importlib.util.module_from_spec(spec)
-        previous_module = sys.modules.get(spec.name)
-        sys.modules[spec.name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            if previous_module is None:
-                sys.modules.pop(spec.name, None)
-            else:
-                sys.modules[spec.name] = previous_module
-        module.verify_release(bundle, bundle_sha)
+
+        def git(*args: str) -> bytes:
+            # No inherited Git configuration, object replacements, hooks, shell,
+            # credential, or network operations. All commands below only read.
+            result = subprocess.run(
+                ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+                 "-C", str(bundle), *args],
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "LANG": "C",
+                    "LC_ALL": "C",
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_NO_LAZY_FETCH": "1",
+                    "GIT_OPTIONAL_LOCKS": "0",
+                },
+                capture_output=True,
+                timeout=20,
+                check=True,
+            )
+            return result.stdout
+
+        if git("rev-parse", "HEAD").decode().strip() != bundle_sha:
+            raise ValueError("bundle revision mismatch")
+        if git("remote", "get-url", "origin").decode().strip() not in {
+            "https://github.com/keelapi/keel-setup",
+            "https://github.com/keelapi/keel-setup.git",
+            "git@github.com:keelapi/keel-setup.git",
+            "ssh://git@github.com/keelapi/keel-setup.git",
+        }:
+            raise ValueError("unofficial bundle origin")
+        if (git("ls-files", "--others", "--exclude-standard")
+                or git("diff", "--cached", "--name-only", "--no-ext-diff",
+                       "--no-textconv", bundle_sha)):
+            raise ValueError("bundle checkout is not clean")
+
+        # Compare actual bytes, not index stat data or a mutable SHA256SUMS.
+        # This also catches tracked edits hidden by assume-unchanged flags.
+        entries = git("ls-tree", "-rz", bundle_sha).split(b"\0")
+        if len(entries) < 2:
+            raise ValueError("empty bundle tree")
+        for entry in entries[:-1]:
+            metadata, raw_path = entry.split(b"\t", 1)
+            mode, kind, oid = metadata.decode("ascii").split()
+            relative = pathlib.PurePosixPath(raw_path.decode("utf-8"))
+            if (mode not in {"100644", "100755"} or kind != "blob"
+                    or relative.is_absolute() or ".." in relative.parts):
+                raise ValueError("unsupported bundle entry")
+            path = bundle.joinpath(*relative.parts)
+            if any(bundle.joinpath(*relative.parts[:i]).is_symlink()
+                   for i in range(1, len(relative.parts) + 1)):
+                raise ValueError("symlink in bundle path")
+            if path.read_bytes() != git("cat-file", "blob", oid):
+                raise ValueError("bundle file differs from pinned bytes")
     except Exception as exc:
         raise RuntimeError("pinned release verification failed") from exc
 

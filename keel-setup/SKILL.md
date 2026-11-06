@@ -440,8 +440,11 @@ matching, and surface them in `verification details` rather than in the default 
 either is null, say there that exact correlation is unavailable; never infer it from a nearby model
 name or timestamp.
 
-In interactive mode, the helper verifies the exact public bundle identity, allowlist, provenance,
-product digest, and checksums before opening the no-echo TTY prompt. It fetches the authoritative
+In interactive mode, the helper verifies the exact public bundle identity and compares every tracked
+file with the caller-pinned Git commit before opening the no-echo TTY prompt. This authenticates the
+release metadata and checksums reviewed by publication CI without importing or executing a bundled
+verifier. The credential entrypoint and caller-supplied commit pin must themselves be trusted.
+It fetches the authoritative
 verification profile, generates an integer timestamp and a distinct nonce inside each request, sends
 `input.messages`, performs the allow and deny requests, then refetches the profile and requires the same
 profile digest before reporting success. It prints only bounded classification fields. Exit `0` means

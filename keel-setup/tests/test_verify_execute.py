@@ -577,27 +577,6 @@ class ProtocolDoubleTest(unittest.TestCase):
         prompt.assert_not_called()
         self.assertEqual(err.getvalue(), "pinned release verification failed\n")
 
-    def test_release_verifier_loads_a_dataclass_helper_before_prompt(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            bundle = pathlib.Path(temp_dir)
-            scripts = bundle / "keel-setup" / "scripts"
-            scripts.mkdir(parents=True)
-            helper = scripts / "fast_first_run.py"
-            helper.write_text(
-                "from __future__ import annotations\n"
-                "from dataclasses import dataclass\n"
-                "@dataclass(frozen=True)\n"
-                "class Marker:\n"
-                "    value: str\n"
-                "def verify_release(bundle, expected_sha):\n"
-                "    assert bundle == __import__('pathlib').Path(__file__).resolve().parents[2]\n"
-                "    assert expected_sha == 'a' * 40\n",
-                encoding="utf-8",
-            )
-            synthetic_script = scripts / "verify_execute.py"
-            with mock.patch.object(verify_execute, "__file__", str(synthetic_script)):
-                verify_execute._verify_pinned_release("a" * 40)
-
     def test_base_url_accepts_only_production_origin_or_explicit_loopback_port(self):
         accepted = [
             "https://api.keelapi.com", "https://api.keelapi.com/", "https://api.keelapi.com:443",
@@ -634,6 +613,152 @@ class ProtocolDoubleTest(unittest.TestCase):
         redacted = verify_execute.redact_record(record, sentinel)
         self.assertEqual(redacted["error_code"], "[REDACTED]")
         self.assertNotIn(sentinel, json.dumps(redacted))
+
+
+class PinnedReleaseGateTest(unittest.TestCase):
+    """Exercise both credential gates against real disposable Git repositories."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location(
+            "gate_authoring_context", SCRIPT.with_name("authoring_context.py")
+        )
+        self.authoring = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.authoring)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.bundle = pathlib.Path(self.temp.name)
+        scripts = self.bundle / "keel-setup/scripts"
+        scripts.mkdir(parents=True)
+        self.sibling = scripts / "fast_first_run.py"
+        self.sibling.write_text("def verify_release(*args): pass\n")
+        (self.bundle / "scripts").mkdir()
+        self.checker = self.bundle / "scripts/check_release_bundle.py"
+        self.checker.write_text("raise AssertionError('must not execute checker')\n")
+        self.git("init", "-q")
+        self.git("config", "user.name", "Gate test")
+        self.git("config", "user.email", "gate@example.invalid")
+        self.git("remote", "add", "origin", "https://github.com/keelapi/keel-setup.git")
+        self.git("add", ".")
+        self.git("commit", "-qm", "fixture")
+        self.pin = self.git("rev-parse", "HEAD").strip()
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.bundle), *args], check=True,
+            capture_output=True, text=True,
+        ).stdout
+
+    def gates(self):
+        return (verify_execute, self.authoring)
+
+    def check_gate(self, module, pin=None):
+        with mock.patch.object(module, "__file__", str(self.sibling.with_name("trusted.py"))):
+            module._verify_pinned_release(self.pin if pin is None else pin)
+
+    def test_clean_pinned_bundle_never_executes_siblings(self):
+        for module in self.gates():
+            with self.subTest(module=module.__name__):
+                self.check_gate(module)
+
+    def test_tampered_sibling_cannot_patch_prompt_or_network(self):
+        marker = self.bundle / "executed"
+        payload = (
+            "import pathlib, getpass, urllib.request\n"
+            f"pathlib.Path({str(marker)!r}).touch()\n"
+            "getpass.getpass = lambda *a, **k: 'stolen'\n"
+            "urllib.request.build_opener = lambda *a: None\n"
+            "def verify_release(*args): pass\n"
+        )
+        original_prompt = verify_execute.getpass.getpass
+        original_opener = urllib.request.build_opener
+        self.sibling.write_text(payload)
+        # Git cleanliness alone misses both of these flags.
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            self.git("update-index", flag, "keel-setup/scripts/fast_first_run.py")
+            for module in self.gates():
+                with self.subTest(flag=flag, module=module.__name__):
+                    with mock.patch.object(module, "__file__", str(self.sibling.with_name("trusted.py"))), \
+                         mock.patch.object(module, "_read_hidden_runtime_key") as prompt, \
+                         mock.patch.object(module, "_open") as network, \
+                         contextlib.redirect_stderr(io.StringIO()):
+                        args = ["--bundle-sha", self.pin]
+                        if module is verify_execute:
+                            args.append("--hidden-input")
+                        self.assertEqual(module.main(args), 2)
+                    prompt.assert_not_called()
+                    network.assert_not_called()
+                    self.assertFalse(marker.exists())
+                    self.assertIs(verify_execute.getpass.getpass, original_prompt)
+                    self.assertIs(urllib.request.build_opener, original_opener)
+            self.git("update-index", "--no-assume-unchanged", "--no-skip-worktree", "keel-setup/scripts/fast_first_run.py")
+
+    def test_tampered_checker_hidden_from_status_is_rejected(self):
+        self.checker.write_text("raise AssertionError('tampered checker executed')\n")
+        self.git("update-index", "--assume-unchanged", "scripts/check_release_bundle.py")
+        for module in self.gates():
+            with self.subTest(module=module.__name__), self.assertRaises(RuntimeError):
+                self.check_gate(module)
+
+    def test_symlink_even_to_identical_bytes_is_rejected(self):
+        target = self.bundle / "target"
+        target.write_bytes(self.sibling.read_bytes())
+        self.sibling.unlink()
+        self.sibling.symlink_to(target)
+        self.git("update-index", "--assume-unchanged", "keel-setup/scripts/fast_first_run.py")
+        target.rename(self.bundle / ".git/target")
+        self.sibling.unlink()
+        self.sibling.symlink_to(self.bundle / ".git/target")
+        for module in self.gates():
+            with self.subTest(module=module.__name__), self.assertRaises(RuntimeError):
+                self.check_gate(module)
+
+    def test_invalid_pin_origin_and_dirty_bundle_are_rejected(self):
+        for pin in ("a" * 40, self.pin.upper(), "HEAD", ""):
+            for module in self.gates():
+                with self.subTest(pin=pin, module=module.__name__), self.assertRaises(RuntimeError):
+                    self.check_gate(module, pin)
+        self.git("remote", "set-url", "origin", "https://example.invalid/bundle")
+        for module in self.gates():
+            with self.assertRaises(RuntimeError):
+                self.check_gate(module)
+        self.git("remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+        (self.bundle / "untracked").touch()
+        for module in self.gates():
+            with self.assertRaises(RuntimeError):
+                self.check_gate(module)
+
+    def test_replacement_objects_cannot_authenticate_modified_files(self):
+        original = self.git("rev-parse", "HEAD:keel-setup/scripts/fast_first_run.py").strip()
+        self.sibling.write_text("def verify_release(*args): return 'forged'\n")
+        replacement = self.git("hash-object", "-w", str(self.sibling)).strip()
+        self.git("replace", original, replacement)
+        self.git("update-index", "--assume-unchanged", "keel-setup/scripts/fast_first_run.py")
+        for module in self.gates():
+            with self.subTest(module=module.__name__), self.assertRaises(RuntimeError):
+                self.check_gate(module)
+
+    def test_submodule_is_not_an_authenticated_regular_file(self):
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{self.pin},nested")
+        self.git("commit", "-qm", "submodule fixture")
+        self.pin = self.git("rev-parse", "HEAD").strip()
+        for module in self.gates():
+            with self.subTest(module=module.__name__), self.assertRaises(RuntimeError):
+                self.check_gate(module)
+
+    def test_local_fsmonitor_hook_is_never_executed(self):
+        marker = self.bundle / "hook-executed"
+        hook = self.bundle / ".git/fsmonitor"
+        hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+        hook.chmod(0o755)
+        self.git("config", "core.fsmonitor", str(hook))
+        for module in self.gates():
+            with self.subTest(module=module.__name__):
+                self.check_gate(module)
+        self.assertFalse(marker.exists())
+
+    def test_gate_implementations_remain_identical(self):
+        self.assertEqual(inspect.getsource(verify_execute._verify_pinned_release),
+                         inspect.getsource(self.authoring._verify_pinned_release))
 
 
 if __name__ == "__main__":
