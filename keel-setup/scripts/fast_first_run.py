@@ -125,7 +125,7 @@ def _run(
 
 
 def _git(repo: pathlib.Path, *args: str, timeout: int = 10, path_output: bool = False) -> str:
-    result = _run(["git", "-C", str(repo), *args], cwd=repo, timeout=timeout)
+    result = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], cwd=repo, timeout=timeout)
     if result.returncode != 0:
         raise PipelineFailure("validation_failed", f"git {' '.join(args)} failed")
     return result.stdout.removesuffix("\n") if path_output else result.stdout.strip()
@@ -727,7 +727,7 @@ def validate_patch(
     if re.search(r"(?i)KEEL_API_KEY\s*[:=]\s*['\"][^'\"]+", after_source):
         raise PipelineFailure("validation_failed", "generated source contains a credential value")
     status = _run(
-        ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=repo,
     )
     if status.returncode != 0:
@@ -742,14 +742,14 @@ def validate_patch(
     if seam.coupled_test:
         module = seam.coupled_test.with_suffix("").as_posix().replace("/", ".")
         focused_test = f"{module}.SummarizerTests.test_sends_text_to_the_selected_model"
-        tested = _run(
-            [sys.executable, "-m", "unittest", focused_test, "-v"],
-            cwd=repo,
-            timeout=15,
-            env=SAFE_SUBPROCESS_ENV,
-        )
-        if tested.returncode != 0:
-            raise PipelineFailure("validation_failed", "the one focused callable-compatibility test failed")
+        # Test collection imports target packages and application initialization.
+        # A reduced environment and timeout do not isolate the host. Only compile
+        # here; runtime compatibility requires isolated post-gate execution.
+        try:
+            compile(repo.joinpath(*seam.coupled_test.parts).read_text(encoding="utf-8"),
+                    seam.coupled_test.as_posix(), "exec")
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            raise PipelineFailure("validation_failed", "generated compatibility test does not compile") from exc
     return {
         "callable_signature_compatible": True,
         "compile_without_import": True,
@@ -761,6 +761,7 @@ def validate_patch(
         "credential_value_absent": True,
         "changed_paths": sorted(allowed_paths),
         "focused_compatibility_test": focused_test,
+        "focused_compatibility_test_status": "deferred_requires_isolation" if focused_test else "not_applicable",
     }
 
 
@@ -770,14 +771,14 @@ def _write(path: pathlib.Path, content: str) -> None:
 
 
 def _ensure_state_ignored(repo: pathlib.Path) -> bool:
-    checked = _run(["git", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
+    checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode == 0:
         return False
     path = repo / ".gitignore"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     suffix = "" if not existing or existing.endswith("\n") else "\n"
     _write(path, existing + suffix + ".keel/setup-state.json\n")
-    checked = _run(["git", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
+    checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode != 0:
         raise PipelineFailure("validation_failed", "local setup state could not be git-ignored")
     return True

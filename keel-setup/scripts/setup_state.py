@@ -236,7 +236,7 @@ def validate_prepared_paths(
             try:
                 status = subprocess.run(
                     [
-                        "git", "-C", str(root), "status", "--porcelain=v1",
+                        "git", "-c", "core.fsmonitor=false", "-C", str(root), "status", "--porcelain=v1",
                         "--untracked-files=all", "--", raw_path,
                     ],
                     capture_output=True,
@@ -338,7 +338,7 @@ def is_git_ignored(repo_root: pathlib.Path, relative: pathlib.PurePosixPath) -> 
 
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "check-ignore", "-q", str(relative)],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(repo_root), "check-ignore", "-q", str(relative)],
             capture_output=True,
             timeout=5,
             check=False,

@@ -380,7 +380,8 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertIn("`summarize(text, *, model=None)`", fast)
         self.assertIn("must not silently become", fast)
         self.assertIn("compatibility of the recorded callable parameters and defaults", fast)
-        self.assertIn("run that one focused test before the gate", fast)
+        self.assertIn("There is no pre-gate target execution exception", fast)
+        self.assertIn("Defer runtime compatibility checks until isolated post-gate validation", fast)
         self.assertIn("stop for explicit human direction", fast)
         self.assertIn("Do not run broader tests", fast)
 

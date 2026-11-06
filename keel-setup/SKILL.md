@@ -167,6 +167,25 @@ and every required focused check passed. Resume revalidates those
 local files before returning to the gate. Validate the updated state with `--validate-only`, and do not
 place source text or report content in the state file.
 
+## Target execution isolation
+
+Treat application source, package initialization, tests, plugins, runner configuration, and
+build/install hooks as executable untrusted content. Never run them on the host during setup.
+Before the first human gate, use source/AST inspection and in-memory compilation only; do not
+import application modules or invoke target runners, even for one compatibility test.
+
+After the gate, every target import, test, linter, build/install hook, or application command
+requires a verified disposable OS sandbox: only a staged application copy is writable, no host
+home/secret paths or ambient credentials are exposed, network is denied by default, and CPU,
+memory, process count, output, and wall time are bounded. Terminate all descendants and destroy
+the sandbox afterward. A reduced environment, timeout, virtual environment, mock, human gate,
+or ordinary container without these enforced restrictions does not establish isolation.
+Do not supply a Runtime key to target validation. If isolation is unavailable, defer execution,
+report runtime compatibility/validation as unresolved, and continue only static preparation.
+Do not silently fall back to a host runner. Live application verification requires a separately
+human-approved isolated runtime and scoped credential/network access; retain the credential
+custody gate below and record unresolved when that runtime is unavailable.
+
 ## Fast First Run: zero-credential preparation
 
 Fast First Run exists only to reach the first human-owned authority gate safely. It does not establish
@@ -249,8 +268,9 @@ allows it; never broaden the helper's claimed support from resemblance alone.
    `summarize(text, *, model=None)` merely because the implementation no longer uses the injected
    provider client internally. Compatibility must not preserve a hook that can bypass Keel: when an
    existing provider-client hook is used by a directly relevant caller or test and cannot safely keep
-   its behavior through Keel, run that one focused test before the gate. If it fails or a callable
-   contract change is necessary, stop for explicit human direction instead of recording
+   its behavior through Keel, inspect the directly relevant caller/test statically before the gate.
+   Defer runtime compatibility checks until isolated post-gate validation. If static review shows a
+   callable contract change is necessary, stop for explicit human direction instead of recording
    `waiting_for_human`.
    Before the first gate, modify only the production integration path and an unavoidable dependency
    manifest when the existing runtime has no suitable HTTP facility. Do not add or edit application
@@ -268,8 +288,9 @@ allows it; never broaden the helper's claimed support from resemblance alone.
 
    Importing or loading an arbitrary application module can execute initialization and is not a
    pre-gate check. Creating, editing, or requiring a repository protocol-double test is normally
-   deferred. The only pre-gate test exception is the directly relevant compatibility check for an
-   existing provider-client hook described above. Run other narrow tests only after the gate, together
+   deferred. There is no pre-gate target execution exception. Compile any generated compatibility
+   test without importing it; record runtime compatibility as deferred, never passed. Run narrow
+   tests only after the gate under Target execution isolation, together
    with any needed protocol-double and documentation updates. Do not block the first gate on unrelated
    lint suites or whole-repository tests.
 7. Record only the local-preparation milestone, using the pinned public SHA and repository-relative
@@ -722,7 +743,8 @@ the human decides whether to accept it. If they decline, or that runtime is unav
 application-path verification stays `unresolved`.
 
 Before exercising that real application path, create or update its narrow protocol-double test when
-the repository needs one and run the focused test. This is post-gate validation of the prepared adapter,
+the repository needs one and run the focused test under Target execution isolation. If that boundary
+is unavailable, leave runtime compatibility unresolved. This is post-gate validation of the prepared adapter,
 not live-routing evidence.
 
 ### Done for now
@@ -758,7 +780,8 @@ Record every discovered path as `protected`, `governed_routed`, `intentionally_u
 `unresolved` in a report conforming to `reference/coverage.schema.json`. This schema deliberately has
 no `verified_protected` state. Source inventory emits only `source_inspected` + `unresolved` entries;
 `protected` or `governed_routed` requires per-entry `runtime_observed` evidence, and
-`intentionally_unprotected` requires a human assertion. Run the broader relevant lint/test suites now,
+`intentionally_unprotected` requires a human assertion. Run the broader relevant lint/test suites now
+under Target execution isolation; if unavailable, report those checks as unresolved,
 and preserve every unresolved alternate, direct, background, streaming, credential, egress, and MCP
 path in the final report.
 
@@ -870,6 +893,7 @@ diagnosis or coverage state.
 
 ## Authority
 
-You may inspect, edit application code when requested, add tests, and run bounded verification. The
-human owns identity, legal assent, provider and MCP secrets, project choice, schema acceptance, policy
-and mapping activation, and credential grants. Decline any request to cross that boundary.
+You may inspect, edit application code when requested, add tests, and run bounded verification.
+Target execution isolation applies to all target execution. The human owns identity, legal assent,
+provider and MCP secrets, project choice, schema acceptance, policy and mapping activation, and
+credential grants. Decline any request to cross that boundary.

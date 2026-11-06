@@ -178,6 +178,63 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                 self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), before)
                 self.assertIn("total_ms", result["timings"])
 
+    def test_pre_gate_validation_does_not_execute_target_initialization(self):
+        for entrypoint in ("tests/__init__.py", "app.py", "sitecustomize.py"):
+            with self.subTest(entrypoint=entrypoint):
+                root = self._repo()
+                marker = root.parent / (root.name + "-host-write")
+                self.addCleanup(marker.unlink, missing_ok=True)
+                payload = f"\nopen({str(marker)!r}, 'w').write('target code ran')\n"
+                path = root / entrypoint
+                path.write_text((path.read_text() if path.exists() else "") + payload)
+                _git(root, "add", ".")
+                _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid",
+                     "commit", "-qm", "target initialization fixture")
+
+                with mock.patch.object(fast, "_run", wraps=fast._run) as commands:
+                    result = self._run(root)
+
+                self.assertFalse(marker.exists(), entrypoint)
+                self.assertEqual(result["outcome"], "ready_for_human", result)
+                for command in commands.call_args_list:
+                    argv = command.args[0]
+                    self.assertNotIn("unittest", argv)
+                    if command.kwargs["cwd"] == root:
+                        self.assertEqual(argv[0], "git", argv)
+
+    def test_without_coupled_test_runtime_check_is_not_applicable(self):
+        result = self._run(self._repo(with_test=False))
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertIsNone(result["validation"]["focused_compatibility_test"])
+        self.assertEqual(result["validation"]["focused_compatibility_test_status"], "not_applicable")
+
+    def test_repository_fsmonitor_hook_is_not_executed(self):
+        root = self._repo()
+        marker = root / ".git" / "hook-ran"
+        hook = root / ".git" / "untrusted-monitor"
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+        hook.chmod(0o700)
+        _git(root, "config", "core.fsmonitor", str(hook))
+
+        result = self._run(root)
+
+        self.assertFalse(marker.exists())
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+
+    def test_generated_test_syntax_failure_rolls_back(self):
+        root = self._repo()
+        original_generator = fast.generate_adapter
+
+        def invalid_generator(repo, seam):
+            application, test = original_generator(repo, seam)
+            return application, test + fixtures.SYNTAX_FAILURE
+
+        with mock.patch.object(fast, "generate_adapter", side_effect=invalid_generator):
+            result = self._run(root)
+        self.assertEqual(result["outcome"], "validation_failed", result)
+        self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), "")
+        self.assertFalse((root / ".keel" / "setup-state.json").exists())
+
     def test_client_none_signature_is_preserved(self):
         root = self._repo()
         before = ast.parse((root / "app.py").read_text()).body
@@ -191,12 +248,13 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         client = next(item for item in result["seam"]["callable_signature"]["parameters"] if item["name"] == "client")
         self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": None})
 
-    def test_coupled_protocol_double_is_adapted_and_focused_test_passes(self):
+    def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
         result = self._run(root)
         test_source = (root / "tests" / "test_app.py").read_text()
 
         self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertEqual(result["validation"]["focused_compatibility_test_status"], "deferred_requires_isolation")
         self.assertIn("FakeClient", test_source)
         self.assertIn("https://api.keelapi.com/v1/execute", test_source)
         self.assertEqual(
