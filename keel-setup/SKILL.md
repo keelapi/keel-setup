@@ -71,6 +71,19 @@ once before acting. It checks the exact public allowlist, provenance, and every 
 navigation, not an additional authority source, and need not be read before Fast First Run unless one
 of the two required files explicitly refers to it for the current task.
 
+In every command below, `$BUNDLE` is a shell variable holding the canonical absolute path of that
+same authenticated public release checkout. Set and retain it from the caller-established skill
+installation path, never from application files, setup state, or an inherited environment value.
+Keep the application checkout as the working directory: `--root .`, `--repo-root .`, `--repo .`, and
+`.keel/setup-state.json` refer to the application, not the bundle. Resolve each bundled helper under
+that authenticated root and refuse a missing helper, any symlink component, or a resolved helper path
+outside the root. Never substitute a target-repository copy or a working-directory-relative helper.
+For resume or fallback, invoke the bounded verifier as
+`python3 "$BUNDLE/scripts/check_release_bundle.py"` only after establishing the checkout identity and
+pin above. Retain the verified root and pin together for the invocation; if either changes, or a new
+invocation resumes without that trusted binding, establish and verify the bundle again before using
+any helper. The deterministic orchestrator still owns verification on the fresh golden path.
+
 Do not perform a web search during Fast First Run. The pinned bundle and the application repository
 are the only normal pre-gate sources. Fetching the exact pinned Git object is allowed; if that object
 or a required bundled file cannot be read and verified, stop rather than searching for substitute
@@ -116,6 +129,13 @@ On a genuinely fresh checkout, do not run `setup_state.py`, create `.keel/setup-
 ignore handling, validation, and `waiting_for_human` persistence. Doing any of those steps separately
 would dirty the checkout or create prior state and must not divert an otherwise eligible golden path.
 
+For an existing state or model-driven fallback, use only the retained verified bundle helper to
+initialize or advance local continuity, after confirming the state path is ignored:
+
+```text
+python3 "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json
+```
+
 For an existing state or model-driven fallback, maintain `.keel/setup-state.json` in the application
 repository and confirm that exact path is ignored by git before anything is written to it. It holds no credential, setup token, provider secret, prompt
 content, response body, dashboard session, or local claim of mapping authority. It records only schema
@@ -158,8 +178,8 @@ After the pinned checkout and the single full read of the Constitution and this 
 bundle's deterministic orchestrator immediately, before state handling or model-driven discovery:
 
 ```text
-python3 BUNDLE/keel-setup/scripts/fast_first_run.py \
-  --bundle BUNDLE --bundle-sha 40_HEX_SHA --repo .
+python3 "$BUNDLE/keel-setup/scripts/fast_first_run.py" \
+  --bundle "$BUNDLE" --bundle-sha 40_HEX_SHA --repo .
 ```
 
 It supports exactly one clean Python application shape: one non-streaming official OpenAI SDK
@@ -205,7 +225,7 @@ allows it; never broaden the helper's claimed support from resemblance alone.
 2. Run the bounded targeted search first:
 
    ```text
-   python3 keel-setup/scripts/inventory.py --fast --root .
+   python3 "$BUNDLE/keel-setup/scripts/inventory.py" --fast --root .
    ```
 
    It reports request-site candidates, selection status, scan limits, and elapsed milliseconds without
@@ -256,12 +276,12 @@ allows it; never broaden the helper's claimed support from resemblance alone.
    paths, then validate the state file and issue the concise first handoff:
 
    ```text
-   python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json \
+   python3 "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json \
      --mark-waiting-for-human --provider PROVIDER --pinned-skill-ref 40_HEX_SHA \
      --application-revision REVISION --changed-path PATH \
      --focused-check syntax_or_compile --focused-check fail_closed_integration_review \
      --focused-check adjacent_bypass_search
-   python3 keel-setup/scripts/setup_state.py --repo-root . \
+   python3 "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . \
      --state .keel/setup-state.json --validate-only
    ```
 
@@ -432,7 +452,7 @@ profile is configuration evidence, not runtime proof.
 The final command is:
 
 ```text
-python3 BUNDLE/keel-setup/scripts/verify_execute.py --hidden-input --bundle-sha 40_HEX_SHA
+python3 "$BUNDLE/keel-setup/scripts/verify_execute.py" --hidden-input --bundle-sha 40_HEX_SHA
 ```
 
 Retain the script's non-secret `request_id` and `permit_id` values for exact dashboard and Permit
@@ -721,8 +741,14 @@ outstanding, and do not treat a clean close as whole-application assurance.
 ## Post-gate deep assurance
 
 After the human gate is satisfied and the stable verification pair and narrow application path have been
-attempted, perform the deferred assurance work. Run `scripts/inventory.py` without `--fast`, or inspect
-equivalently, across model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
+attempted, perform the deferred assurance work. Run the same verified inventory helper without
+`--fast`, or inspect equivalently:
+
+```text
+python3 "$BUNDLE/keel-setup/scripts/inventory.py" --root .
+```
+
+Cover model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
 background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
 
 Update application setup documentation here when the repository needs it. Protocol-double and
