@@ -642,6 +642,15 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         print("Pinned Keel setup release verified.", file=sys.stderr)
+        if args.base_url != DEFAULT_BASE_URL:
+            print(f"Protocol double destination: {args.base_url}. Use a test-only credential.", file=sys.stderr)
+            try:
+                confirmed = input("Type the exact destination URL to confirm: ")
+            except (EOFError, OSError, KeyboardInterrupt):
+                confirmed = ""
+            if confirmed != args.base_url:
+                print("Destination was not confirmed; no credential was read.", file=sys.stderr)
+                return 2
         try:
             credential = _read_hidden_runtime_key()
         except (RuntimeError, KeyboardInterrupt) as exc:
