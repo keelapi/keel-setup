@@ -239,7 +239,7 @@ Save only that safe JSON as `authoring-context.json`, then run this offline cons
 bundle root (fill operation and evidence from source inspection, not from the human's guess):
 
 ```sh
-python3 keel-policy/scripts/consume_authoring_context.py \
+python3 -I keel-policy/scripts/consume_authoring_context.py \
   --context authoring-context.json --operation generate.text \
   --evidence 'app.py:42: inspected text-response request used by the summarizer' \
   --current-model 'PROVIDER:MODEL_ID'

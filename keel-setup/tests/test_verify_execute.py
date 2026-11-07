@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 import uuid
 import warnings
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
@@ -759,6 +760,83 @@ class PinnedReleaseGateTest(unittest.TestCase):
     def test_gate_implementations_remain_identical(self):
         self.assertEqual(inspect.getsource(verify_execute._verify_pinned_release),
                          inspect.getsource(self.authoring._verify_pinned_release))
+
+    def assert_gates_refuse_before_prompt(self):
+        """Exercise the command boundary, not just its private verifier."""
+        for module in self.gates():
+            with self.subTest(module=module.__name__), \
+                 mock.patch.object(module, "__file__", str(self.sibling.with_name("trusted.py"))), \
+                 mock.patch.object(module, "_read_hidden_runtime_key") as prompt, \
+                 mock.patch.object(module, "_open") as network, \
+                 contextlib.redirect_stderr(io.StringIO()):
+                args = ["--bundle-sha", self.pin]
+                if module is verify_execute:
+                    args.append("--hidden-input")
+                self.assertEqual(module.main(args), 2)
+                prompt.assert_not_called()
+                network.assert_not_called()
+
+    def test_ignored_extras_including_cache_payloads_are_rejected(self):
+        for relative in (".env.local", "__pycache__/payload.py", "__pycache__/payload.pyc"):
+            with self.subTest(relative=relative):
+                extra = self.bundle / relative
+                extra.parent.mkdir(exist_ok=True)
+                extra.write_text("untrusted content")
+                (self.bundle / ".git/info/exclude").write_text(".env*\n__pycache__/\n")
+                self.assertEqual(self.git("status", "--porcelain"), "")
+                self.assert_gates_refuse_before_prompt()
+                extra.unlink()
+
+    def test_nested_bundle_is_rejected_before_prompt(self):
+        original = self.sibling
+        self.sibling = self.bundle / ".ignored/keel-setup/scripts/fast_first_run.py"
+        self.sibling.parent.mkdir(parents=True)
+        (self.bundle / ".git/info/exclude").write_text(".ignored/\n")
+        self.assert_gates_refuse_before_prompt()
+        self.sibling = original
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO required")
+    def test_tracked_fifo_is_rejected_without_reading_or_prompting(self):
+        self.sibling.unlink()
+        os.mkfifo(self.sibling)
+        self.git("update-index", "--assume-unchanged", "keel-setup/scripts/fast_first_run.py")
+        self.assert_gates_refuse_before_prompt()
+
+    def test_linked_worktree_remains_supported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            linked = pathlib.Path(temporary) / "linked release"
+            self.git("worktree", "add", "--detach", str(linked), self.pin)
+            for module in self.gates():
+                with mock.patch.object(module, "__file__", str(linked / "keel-setup/scripts/trusted.py")):
+                    module._verify_pinned_release(self.pin)
+
+    def forge_object(self, kind, path):
+        """Put different valid snapshot data under an original object's ID."""
+        original_ref = self.pin + (":" + path if path is not None else "")
+        original_oid = self.git("rev-parse", original_ref).strip()
+        self.sibling.write_text("def verify_release(*args): return 'forged'\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "forged snapshot")
+        forged_ref = "HEAD" + (":" + path if path is not None else "")
+        data = subprocess.check_output(["git", "-C", str(self.bundle), "cat-file", kind, forged_ref])
+        self.git("reset", "--mixed", self.pin)
+        self.git("update-index", "--assume-unchanged", "keel-setup/scripts/fast_first_run.py")
+        loose = self.bundle / ".git/objects" / original_oid[:2] / original_oid[2:]
+        loose.unlink()
+        loose.write_bytes(zlib.compress(f"{kind} {len(data)}\0".encode() + data))
+        self.assert_gates_refuse_before_prompt()
+
+    def test_forged_loose_blob_is_rejected(self):
+        self.forge_object("blob", "keel-setup/scripts/fast_first_run.py")
+
+    def test_forged_nested_tree_is_rejected(self):
+        self.forge_object("tree", "keel-setup/scripts")
+
+    def test_forged_root_tree_is_rejected(self):
+        self.forge_object("tree", "")
+
+    def test_forged_pinned_commit_is_rejected(self):
+        self.forge_object("commit", None)
 
 
 if __name__ == "__main__":

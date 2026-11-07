@@ -721,7 +721,7 @@ class SourceCustodyTest(unittest.TestCase):
 
     def test_helper_is_standard_library_only(self):
         allowed = {
-            "__future__", "argparse", "decimal", "getpass", "importlib", "json",
+            "__future__", "hashlib", "os", "stat", "argparse", "decimal", "getpass", "importlib", "json",
             "pathlib", "re", "secrets", "subprocess", "sys", "time", "urllib", "warnings", "typing",
         }
         imports = [
@@ -737,7 +737,9 @@ class SourceCustodyTest(unittest.TestCase):
     def test_helper_never_reads_a_credential_environment_variable(self):
         for reader in ("os.environ", "os.getenv", "environ[", "environ.get", "getenv("):
             self.assertNotIn(reader, self.source)
-        self.assertNotIn("import os", self.source)
+        self.assertIn("os.O_RDONLY", self.source)
+        self.assertNotIn("os.O_WRONLY", self.source)
+        self.assertNotIn("os.O_RDWR", self.source)
 
     def test_helper_declares_no_credential_argument(self):
         for word in ("--key", "--api-key", "--token", "--secret", "--credential"):

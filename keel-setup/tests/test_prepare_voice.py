@@ -21,34 +21,52 @@ class PreparationTests(unittest.TestCase):
         target.parent.mkdir(parents=True)
         target.write_bytes(contract.read_bytes())
 
-    def runner(self, args, **kwargs):
-        self.assertNotIn('shell',kwargs)
-        stdout='a'*40 if 'rev-parse' in args else ''
-        return subprocess.CompletedProcess(args,0,stdout=stdout)
+    def git(self, *args):
+        return subprocess.run(['git', '-C', str(self.bundle), *args],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def authenticate_fixture(self):
+        checker = self.bundle / 'scripts/check_release_bundle.py'
+        checker.parent.mkdir()
+        checker.write_text("print('PASS: public setup bundle (fixture)')\n")
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Voice test')
+        self.git('config', 'user.email', 'voice@example.invalid')
+        self.git('remote', 'add', 'origin', 'https://github.com/keelapi/keel-setup.git')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fixture')
+        return self.git('rev-parse', 'HEAD')
 
     def test_bound_release_reports_preparation_and_gates_only(self):
-        with patch.object(module.subprocess,'run',side_effect=self.runner) as calls:
-            result=module.prepare(self.bundle,'a'*40,'elevenlabs_agents_gateway_ws_v1')
-        self.assertEqual(result['stage'],'preparation_only')
-        self.assertIn('qualified_pricing_admission',result['unresolved_gates'])
-        self.assertEqual(calls.call_count,3)
-        self.assertNotIn('certified',json.dumps(result))
+        pin = self.authenticate_fixture()
+        with patch.object(module.subprocess, 'run', wraps=subprocess.run) as calls:
+            result = module.prepare(self.bundle, pin, 'elevenlabs_agents_gateway_ws_v1')
+        self.assertEqual(result['stage'], 'preparation_only')
+        self.assertIn('qualified_pricing_admission', result['unresolved_gates'])
+        checker_calls = [call.args[0] for call in calls.call_args_list
+                         if any(str(arg).endswith('check_release_bundle.py') for arg in call.args[0])]
+        self.assertEqual(len(checker_calls), 1)
+        self.assertEqual(checker_calls[0][1], '-I')
+        self.assertNotIn('certified', json.dumps(result))
 
     def test_dirty_or_wrong_revision_stops_before_running_bundle_code(self):
-        for outputs in [('b'*40,),('a'*40,' M keel-setup/scripts/prepare_voice.py')]:
-            replies=iter(outputs)
-            def changed(args,**_kwargs):
-                return subprocess.CompletedProcess(args,0,stdout=next(replies))
-            with patch.object(module.subprocess,'run',side_effect=changed) as calls:
-                with self.assertRaises(ValueError):
-                    module.prepare(self.bundle,'a'*40,'elevenlabs_agents_gateway_ws_v1')
-                self.assertLessEqual(calls.call_count,2)
+        pin = self.authenticate_fixture()
+        with self.assertRaises(ValueError):
+            module.prepare(self.bundle, 'b' * 40, 'elevenlabs_agents_gateway_ws_v1')
+        marker = self.bundle.parent / (self.bundle.name + '-checker-ran')
+        self.addCleanup(marker.unlink, missing_ok=True)
+        checker = self.bundle / 'scripts/check_release_bundle.py'
+        checker.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
+        self.git('update-index', '--assume-unchanged', 'scripts/check_release_bundle.py')
+        with self.assertRaises(ValueError):
+            module.prepare(self.bundle, pin, 'elevenlabs_agents_gateway_ws_v1')
+        self.assertFalse(marker.exists())
 
     def test_no_direct_audio_or_unsupported_webrtc_as_voice_proof(self):
-        with patch.object(module.subprocess,'run',side_effect=self.runner):
-            for profile in ['elevenlabs_direct_audio_v1','elevenlabs_agents_webrtc_v1','missing']:
-                with self.assertRaises(ValueError):
-                    module.prepare(self.bundle,'a'*40,profile)
+        pin = self.authenticate_fixture()
+        for profile in ['elevenlabs_direct_audio_v1','elevenlabs_agents_webrtc_v1','missing']:
+            with self.assertRaises(ValueError):
+                module.prepare(self.bundle, pin, profile)
 
 
 if __name__=='__main__':

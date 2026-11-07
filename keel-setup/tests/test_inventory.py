@@ -420,7 +420,7 @@ class FastFirstRunTest(unittest.TestCase):
         deterministic = text.index("### Deterministic golden path")
         fallback = text.index("### Model-driven fallback")
         direct_state_command = text.index(
-            'python3 "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json',
+            'python3 -I "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json',
             fallback,
         )
 
@@ -617,6 +617,9 @@ class PublishedHelperBoundaryTest(unittest.TestCase):
         for relative in ("keel-setup/scripts", "keel-setup/reference", "shared/scripts"):
             shutil.copytree(source / relative, self.bundle / relative)
         self.marker = self.app / "counterfeit-executed"
+        (self.app / "sitecustomize.py").write_text(
+            f"from pathlib import Path\nPath({str(self.marker)!r}).touch()\n"
+        )
         for relative in ("keel-setup/scripts/inventory.py", "keel-setup/scripts/setup_state.py",
                          "scripts/inventory.py"):
             target = self.app / relative
@@ -655,7 +658,7 @@ class PublishedHelperBoundaryTest(unittest.TestCase):
                         "PATH": "prepared.py"}
         args = [replacements.get(arg, arg.replace("$BUNDLE", str(self.bundle))) for arg in args]
         result = subprocess.run(args, cwd=self.app, capture_output=True, text=True,
-                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, timeout=20)
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(self.app)}, timeout=20)
         self.assertFalse(self.marker.exists(), "published command executed a target-side helper")
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
@@ -696,7 +699,12 @@ class PublishedHelperBoundaryTest(unittest.TestCase):
         text = SKILL.read_text(encoding="utf-8")
         for line in text.splitlines():
             if line.strip().startswith("python3 "):
-                self.assertRegex(line.strip(), r'^python3 "\$BUNDLE/[^" ]+\.py"(?: |$)')
+                self.assertRegex(line.strip(), r'^python3 -I "\$BUNDLE/[^" ]+\.py"(?: |$)')
+        for document in SKILL.parents[1].rglob("*.md"):
+            for line in document.read_text().splitlines():
+                if line.strip().startswith("python3 ") and ".py" in line:
+                    self.assertTrue(line.strip().startswith("python3 -I "),
+                                    f"unisolated published command in {document}: {line}")
         self.assertIn("canonical absolute", text)
         self.assertIn("symlink", text)
 

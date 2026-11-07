@@ -13,6 +13,8 @@ import pathlib
 import sys
 from decimal import Decimal
 
+sys.dont_write_bytecode = True
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 _SPEC = importlib.util.spec_from_file_location(
     "keel_published_authoring_context", ROOT / "keel-setup/scripts/authoring_context.py"
