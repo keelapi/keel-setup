@@ -42,6 +42,7 @@ class SchemaSubsetValidatorTest(unittest.TestCase):
                                       ({"open": [value]}, {"type": "object"})):
                 with self.subTest(raw=raw):
                     self.assertTrue(schema_validation.validate(candidate, schema))
+                    self.assertTrue(schema_validation.validate(candidate, schema, root_schema=schema))
         self.assertEqual(schema_validation.validate(0.5, {"type": "number", "exclusiveMinimum": 0}), [])
 
     def test_required_types_limits_unknowns_and_uniqueness(self):

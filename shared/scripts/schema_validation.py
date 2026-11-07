@@ -73,18 +73,27 @@ def validate(
     *,
     root_schema: dict[str, Any] | None = None,
 ) -> list[str]:
-    if root_schema is None:
-        # JSON numbers must be finite, including values in open objects and
-        # overflowed exponents. Check direct library callers as well as JSON.
-        pending = [(path, instance)]
-        while pending:
-            location, value = pending.pop()
-            if isinstance(value, float) and not math.isfinite(value):
-                return [f"{location}: number must be finite"]
-            if isinstance(value, dict):
-                pending.extend((f"{location}.{key}", child) for key, child in value.items())
-            elif isinstance(value, list):
-                pending.extend((f"{location}[{index}]", child) for index, child in enumerate(value))
+    # JSON numbers must be finite, including values in open objects and
+    # overflowed exponents. Check direct library callers as well as JSON.
+    pending = [(path, instance)]
+    while pending:
+        location, value = pending.pop()
+        if isinstance(value, float) and not math.isfinite(value):
+            return [f"{location}: number must be finite"]
+        if isinstance(value, dict):
+            pending.extend((f"{location}.{key}", child) for key, child in value.items())
+        elif isinstance(value, list):
+            pending.extend((f"{location}[{index}]", child) for index, child in enumerate(value))
+    return _validate(instance, schema, path, root_schema=root_schema)
+
+
+def _validate(
+    instance: Any,
+    schema: dict[str, Any],
+    path: str = "$",
+    *,
+    root_schema: dict[str, Any] | None = None,
+) -> list[str]:
     root_schema = schema if root_schema is None else root_schema
     unknown_keywords = set(schema) - SUPPORTED
     if unknown_keywords:
@@ -95,13 +104,13 @@ def validate(
         if referenced is None:
             failures.append(f"{path}: unsupported or missing schema reference {schema['$ref']!r}")
         else:
-            failures.extend(validate(instance, referenced, path, root_schema=root_schema))
+            failures.extend(_validate(instance, referenced, path, root_schema=root_schema))
     if "anyOf" in schema:
-        branches = [validate(instance, branch, path, root_schema=root_schema) for branch in schema["anyOf"]]
+        branches = [_validate(instance, branch, path, root_schema=root_schema) for branch in schema["anyOf"]]
         if not any(not branch for branch in branches):
             failures.append(f"{path}: value matches no anyOf branch")
     if "oneOf" in schema:
-        branches = [validate(instance, branch, path, root_schema=root_schema) for branch in schema["oneOf"]]
+        branches = [_validate(instance, branch, path, root_schema=root_schema) for branch in schema["oneOf"]]
         if sum(not branch for branch in branches) != 1:
             failures.append(f"{path}: value must match exactly one oneOf branch")
     if "const" in schema and instance != schema["const"]:
@@ -125,7 +134,7 @@ def validate(
                 failures.append(f"{path}: unknown property {key!r}")
         for key, value in instance.items():
             if key in properties:
-                failures.extend(validate(value, properties[key], f"{path}.{key}", root_schema=root_schema))
+                failures.extend(_validate(value, properties[key], f"{path}.{key}", root_schema=root_schema))
     if isinstance(instance, list):
         if len(instance) < schema.get("minItems", 0):
             failures.append(f"{path}: has fewer than {schema['minItems']} items")
@@ -138,7 +147,7 @@ def validate(
         item_schema = schema.get("items")
         if item_schema:
             for index, value in enumerate(instance):
-                failures.extend(validate(value, item_schema, f"{path}[{index}]", root_schema=root_schema))
+                failures.extend(_validate(value, item_schema, f"{path}[{index}]", root_schema=root_schema))
     if isinstance(instance, str):
         if len(instance) < schema.get("minLength", 0):
             failures.append(f"{path}: is shorter than {schema['minLength']} characters")
