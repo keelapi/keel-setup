@@ -345,7 +345,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["outcome"], "ready_for_human", result)
         self.assertEqual(fast.callable_signature(before_fn), fast.callable_signature(after_fn))
         client = next(item for item in result["seam"]["callable_signature"]["parameters"] if item["name"] == "client")
-        self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": None})
+        self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": {"required": False}})
 
     def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
@@ -495,24 +495,16 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["outcome"], "ready_for_human", result)
         self.assertEqual(result["seam"]["directly_coupled_test"], "tests/test_app.py")
 
-    def test_ready_result_emits_exact_bounded_diff_and_stats(self):
+    def test_ready_result_emits_only_local_review_metadata(self):
         root = self._repo()
 
         result = self._run(root)
 
         self.assertEqual(result["outcome"], "ready_for_human", result)
         evidence = result["diff"]
-        self.assertFalse(evidence["diff_truncated"])
-        self.assertLessEqual(len(evidence["unified_diff"].encode("utf-8")), fast.MAX_DIFF_BYTES)
+        self.assertNotIn("unified_diff", evidence)
         self.assertIsInstance(evidence["whitespace_only_changed_lines"], int)
-        checked = subprocess.run(
-            ["git", "-C", str(root), "apply", "--check", "--reverse", "-"],
-            input=evidence["unified_diff"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertEqual(set(evidence["digests"]), set(result["validation"]["changed_paths"]))
         numstat = _git(root, "diff", "--numstat", "--", *result["validation"]["changed_paths"])
         expected = {
             path: {"insertions": int(insertions), "deletions": int(deletions)}
@@ -528,7 +520,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
 
         self.assertEqual((insertions, deletions, whitespace_only), (1, 1, 2))
 
-    def test_oversized_diff_is_explicitly_truncated(self):
+    def test_large_source_is_never_embedded_in_metadata(self):
         root = self._repo()
         result = self._run(root)
         allowed = set(result["validation"]["changed_paths"])
@@ -546,9 +538,19 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
 
         evidence = fast.build_diff_evidence(root, allowed, originals)
 
-        self.assertTrue(evidence["diff_truncated"])
-        self.assertLessEqual(len(evidence["unified_diff"].encode("utf-8")), fast.MAX_DIFF_BYTES)
-        self.assertEqual(evidence["max_bytes"], fast.MAX_DIFF_BYTES)
+        self.assertNotIn("unified_diff", evidence)
+        self.assertNotIn("bounded-diff-fixture", json.dumps(evidence))
+        self.assertLess(len(json.dumps(evidence)), 4096)
+
+    def test_opaque_source_and_literal_defaults_never_leave_the_checkout(self):
+        sentinel = "unrecognized-opaque-example-93457"
+        source = fixtures.GOLDEN_APP.replace("model: str | None = None", f"model: str | None = {sentinel!r}")
+        source = source.replace("source = text.strip()", f"source = text.strip()  # {sentinel}")
+        root = self._repo(source)
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertNotIn(sentinel, json.dumps(result))
+        self.assertIn(sentinel, (root / "app.py").read_text())
 
     def test_custom_base_url_is_safe_fallback(self):
         root = self._repo(fixtures.CUSTOM_BASE_URL_APP)

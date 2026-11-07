@@ -93,7 +93,11 @@ class GoldenSeam:
             "path": self.path.as_posix(),
             "line": self.line,
             "symbol": self.symbol,
-            "callable_signature": self.signature,
+            "callable_signature": {"parameters": [
+                {"name": item["name"], "kind": item["kind"],
+                 "default": {"required": isinstance(item["default"], dict) and item["default"].get("required") is True}}
+                for item in self.signature["parameters"]
+            ]},
             "provider": "openai",
             "sdk_shape": GOLDEN_SHAPE,
             "custom_endpoint": False,
@@ -996,10 +1000,10 @@ def build_diff_evidence(
     *,
     max_bytes: int = MAX_DIFF_BYTES,
 ) -> dict[str, Any]:
-    """Return a bounded, source-only unified diff for the exact changed-path allowlist."""
+    """Return metadata only; source and literal values stay in the local checkout."""
 
-    sections: list[str] = []
     stats: dict[str, dict[str, int]] = {}
+    digests: dict[str, dict[str, str]] = {}
     whitespace_only = 0
     for relative_text in sorted(allowed_paths):
         relative = pathlib.PurePosixPath(relative_text)
@@ -1014,33 +1018,13 @@ def build_diff_evidence(
         insertions, deletions, whitespace = _line_change_stats(before, after)
         stats[relative_text] = {"insertions": insertions, "deletions": deletions}
         whitespace_only += whitespace
-        lines = list(
-            difflib.unified_diff(
-                before.splitlines(),
-                after.splitlines(),
-                fromfile=f"a/{relative_text}",
-                tofile=f"b/{relative_text}",
-                lineterm="",
-            )
-        )
-        if lines:
-            sections.append("\n".join(lines) + "\n")
-
-    full_diff = "".join(sections)
-    if DIFF_CREDENTIAL_SHAPE.search(full_diff):
-        raise PipelineFailure("validation_failed", "bounded diff may contain credential material")
-    encoded = full_diff.encode("utf-8")
-    truncated = len(encoded) > max_bytes
-    if truncated:
-        bounded = encoded[:max_bytes].decode("utf-8", errors="ignore")
-    else:
-        bounded = full_diff
+        digests[relative_text] = {"before_sha256": hashlib.sha256(before.encode()).hexdigest(),
+                                  "after_sha256": hashlib.sha256(after.encode()).hexdigest()}
     return {
-        "unified_diff": bounded,
         "per_file": stats,
+        "digests": digests,
         "whitespace_only_changed_lines": whitespace_only,
-        "diff_truncated": truncated,
-        "max_bytes": max_bytes,
+        "human_review": "Inspect the changed files with local git diff before approval.",
     }
 
 

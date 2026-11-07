@@ -217,10 +217,10 @@ inspect bundle history, run the release verifier separately, rediscover the seam
 contract, regenerate the integration, handle setup state separately, rerun the scanner, repeat
 validation or tests, or add intermediate narration on a recognized golden path.
 
-When the result is `ready_for_human`, review the bounded unified diff carried in its `diff` result. If
-`diff_truncated` is `false`, do not rerun `git diff`. If it is `true`, run exactly one targeted
-`git diff` over `validation.changed_paths` before the gate. Do not remove this independent narrow-diff
-review. Render the canonical First human gate block verbatim, substituting only the helper-established
+When the result is `ready_for_human`, its `diff` result contains only counts and digests. Inspect one
+targeted local `git diff` over `validation.changed_paths` before the gate. Keep source hunks and
+literal defaults out of model conversation, stdout reports, and logs. Do not remove this independent
+local review. Render the canonical First human gate block verbatim, substituting only the helper-established
 `PATH`, then wait. The deterministic helper's golden path is OpenAI-only; do not reuse its guided
 dashboard sequence for another provider. The helper result is source-inspected local preparation
 only; it is not runtime evidence.
