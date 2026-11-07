@@ -226,6 +226,23 @@ class CadenceTest(unittest.TestCase):
 
 
 class BeginTest(unittest.TestCase):
+    def test_literal_pathspec_filename_cannot_borrow_an_unrelated_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            magic = ":(glob)*.py"
+            (root / magic).write_text("# /v1/execute\n")
+            (root / "other.py").write_text("# baseline\n")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "literal path fixture"], check=True, capture_output=True)
+            (root / "other.py").write_text("# unrelated edit\n")
+            state = _waiting_state(application_revision=setup_state.current_revision(root), changed_paths=[magic])
+            path = root / ".keel/setup-state.json"
+            path.write_text(json.dumps(state))
+            result = setup_state.begin(path, root)
+            self.assertEqual(result["continuity"], "lost", result)
+            self.assertTrue(any("not changed" in error for error in result["refusals"]))
+
     def test_clean_or_stale_preparation_cannot_resume_the_human_gate(self):
         for stale in (False, True):
             with tempfile.TemporaryDirectory() as directory:

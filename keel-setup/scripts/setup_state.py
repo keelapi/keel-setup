@@ -245,7 +245,7 @@ def validate_prepared_paths(
             try:
                 status = subprocess.run(
                     [
-                        "git", "-c", "core.fsmonitor=false", "-C", str(root), "status", "--porcelain=v1",
+                        "git", "--literal-pathspecs", "-c", "core.fsmonitor=false", "-C", str(root), "status", "--porcelain=v1",
                         "--untracked-files=all", "--", raw_path,
                     ],
                     capture_output=True,
