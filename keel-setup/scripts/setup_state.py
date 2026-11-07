@@ -208,7 +208,7 @@ def validate_prepared_paths(
     state: Any,
     repo_root: pathlib.Path,
     *,
-    require_worktree_change: bool = False,
+    require_worktree_change: bool = True,
 ) -> list[str]:
     """Validate the local files underlying a resumable first-human-gate milestone."""
 
@@ -220,6 +220,9 @@ def validate_prepared_paths(
 
     failures: list[str] = []
     root = repo_root.resolve()
+    revision = current_revision(root)
+    if revision is None or state.get("application_revision") != revision:
+        failures.append("prepared application revision does not match current HEAD")
     integration_marker_found = False
     for index, raw_path in enumerate(changed_paths):
         if not isinstance(raw_path, str):
@@ -269,14 +272,40 @@ def validate_prepared_paths(
         if lowered_parts & NON_PRODUCTION_PATH_PARTS or test_filename:
             continue
         try:
-            integration_marker_found = b"/v1/execute" in resolved.read_bytes()
-        except OSError:
+            raw = _read_bounded_repository_source(candidate, root)
+            if resolved.suffix.lower() == ".py":
+                compile(raw, relative.as_posix(), "exec")
+            if b"/v1/proxy/" in raw or re.search(rb"(?:from|import)\s+(?:openai|anthropic)\b|\.responses\.create\s*\(", raw):
+                failures.append(f"changed_paths[{index}] retains a direct provider or proxy path")
+            integration_marker_found = integration_marker_found or b"/v1/execute" in raw
+        except (OSError, ValueError, SyntaxError):
             failures.append(f"changed_paths[{index}] could not be inspected")
-        if integration_marker_found:
-            break
     if not integration_marker_found:
         failures.append("changed paths do not contain a prepared /v1/execute integration")
     return failures
+
+
+def current_revision(root: pathlib.Path) -> str | None:
+    try:
+        result = subprocess.run(["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "-C", str(root),
+                                 "rev-parse", "HEAD"], capture_output=True, text=True, timeout=5, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    value = result.stdout.strip()
+    return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
+
+
+def _read_bounded_repository_source(path: pathlib.Path, root: pathlib.Path) -> bytes:
+    with _state_parent(path, root) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 1_000_000:
+                raise ValueError("prepared source must be a bounded regular file")
+            raw = stream.read(1_000_001)
+            if len(raw) > 1_000_000:
+                raise ValueError("prepared source exceeds its byte limit")
+            return raw
 
 
 def due_reviews(
@@ -597,8 +626,7 @@ def mark_waiting_for_human(
             "updated_at": _utc_now(),
         }
     )
-    if application_revision is not None:
-        updated["application_revision"] = application_revision
+    updated["application_revision"] = application_revision or current_revision(repo_root)
     failures = validate_state(updated)
     failures.extend(validate_prepared_paths(updated, repo_root, require_worktree_change=True))
     if failures:

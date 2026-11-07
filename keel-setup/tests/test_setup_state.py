@@ -226,11 +226,43 @@ class CadenceTest(unittest.TestCase):
 
 
 class BeginTest(unittest.TestCase):
+    def test_clean_or_stale_preparation_cannot_resume_the_human_gate(self):
+        for stale in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = self._repo(directory)
+                source = root / "service.py"
+                _write_prepared(source)
+                revision = setup_state.current_revision(root)
+                if stale:
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                    "commit", "--allow-empty", "-qm", "new head"], check=True, capture_output=True)
+                else:
+                    subprocess.run(["git", "-C", str(root), "add", "service.py"], check=True, capture_output=True)
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                    "commit", "-qm", "existing route"], check=True, capture_output=True)
+                    revision = setup_state.current_revision(root)
+                path = root / ".keel/setup-state.json"
+                path.write_text(json.dumps(_waiting_state(application_revision=revision)))
+                result = setup_state.begin(path, root)
+                self.assertEqual(result["continuity"], "lost", result)
+                self.assertEqual(result["stage"], "discovery")
+
+    def test_every_recorded_path_is_checked_after_the_first_integration_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            _write_prepared(root / "service.py")
+            state = _waiting_state(application_revision=setup_state.current_revision(root),
+                                   changed_paths=["service.py", "missing.py"])
+            self.assertTrue(any("does not exist" in error for error in setup_state.validate_prepared_paths(state, root)))
+
     def _repo(self, directory: str) -> pathlib.Path:
         root = pathlib.Path(directory)
         (root / ".keel").mkdir()
         (root / ".gitignore").write_text(".keel/\n")
         subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
         return root
 
     def test_missing_file_reports_lost_continuity_and_starts_at_one(self):
@@ -294,7 +326,7 @@ class BeginTest(unittest.TestCase):
             root = self._repo(directory)
             path = root / ".keel" / "setup-state.json"
             _write_prepared(root / "service.py")
-            path.write_text(json.dumps(_waiting_state(invocation_count=19)))
+            path.write_text(json.dumps(_waiting_state(invocation_count=19, application_revision=setup_state.current_revision(root))))
             report = setup_state.begin(path, root)
         self.assertEqual(report["next_phase"], "first_human_gate")
         self.assertEqual(report["due"], ["resume_earliest_unmet_milestone"])
@@ -315,7 +347,7 @@ class BeginTest(unittest.TestCase):
                 root,
                 provider="openai",
                 pinned_skill_ref="a" * 40,
-                application_revision="b" * 40,
+                application_revision=setup_state.current_revision(root),
                 changed_paths=["service.py", "tests/test_service.py"],
                 focused_checks=_focused_checks(),
             )
@@ -532,6 +564,9 @@ class BeginTest(unittest.TestCase):
             root = pathlib.Path(directory)
             (root / ".keel").mkdir()
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             report = setup_state.begin(path, root)
@@ -548,6 +583,9 @@ class CommandLineTest(unittest.TestCase):
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             reports = []
             for _ in range(2):
@@ -565,6 +603,9 @@ class CommandLineTest(unittest.TestCase):
             root = pathlib.Path(directory)
             (root / ".keel").mkdir()
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -577,6 +618,9 @@ class CommandLineTest(unittest.TestCase):
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             with (
                 mock.patch.object(
@@ -618,6 +662,9 @@ class CommandLineTest(unittest.TestCase):
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             _write_prepared(root / "service.py")
             setup_state.begin(path, root)
