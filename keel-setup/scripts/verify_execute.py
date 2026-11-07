@@ -458,9 +458,12 @@ def _allowlisted_scalar(value: Any, allowed: frozenset[str]) -> str | None:
 
 
 def _safe_error_code(value: Any) -> str | None:
-    """Return one bounded protocol error code, never arbitrary response text."""
-
-    if not isinstance(value, str) or _SAFE_ERROR_CODE_PATTERN.fullmatch(value) is None:
+    """Render only a closed local vocabulary, never a remote token."""
+    if not isinstance(value, str) or value not in {
+        "unauthorized", "request_not_fresh", "nonce_reuse", "policy.rule_denied",
+        "verification_profile_unavailable", "verification_profile_pending", "provider_refused",
+        "no_active_policy", "rate_limited", "unavailable", "invalid_request",
+    }:
         return None
     return value
 

@@ -107,6 +107,12 @@ def verification_profile(*, digest: str = "a" * 64):
 
 
 class ClassifierTest(unittest.TestCase):
+    def test_remote_codes_cannot_reflect_credentials_or_arbitrary_tokens(self):
+        for value in ("ks_abcdefghijkl", "sk_abcdefghijkl", "opaque_secret", "x" * 128, "policy.arbitrary"):
+            self.assertIsNone(verify_execute._safe_error_code(value))
+            self.assertNotIn(value, json.dumps(verify_execute.classify(401, {"error": {"code": value}})))
+        self.assertEqual(verify_execute._safe_error_code("unauthorized"), "unauthorized")
+
     def test_http_403_requires_full_tuple(self):
         denied = verify_execute.classify(
             403, {"status": "denied", "governance": {"decision": "deny"}, "error": {"stage": "permit"}}

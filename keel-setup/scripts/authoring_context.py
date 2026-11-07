@@ -424,9 +424,11 @@ def _read_bounded(response: Any) -> bytes:
 
 
 def _safe_error_code(value: Any) -> str | None:
-    """Return one bounded protocol error code, never arbitrary response text."""
-
-    if not isinstance(value, str) or _SAFE_ERROR_CODE_PATTERN.fullmatch(value) is None:
+    """Render only a closed local vocabulary, never a remote token."""
+    if not isinstance(value, str) or value not in {
+        "unauthorized", "request_not_fresh", "nonce_reuse", "authoring_context_unavailable",
+        "rate_limited", "unavailable", "invalid_request",
+    }:
         return None
     return value
 
