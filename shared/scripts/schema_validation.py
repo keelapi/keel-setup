@@ -42,11 +42,13 @@ def _format_matches(value: str, expected: str) -> bool:
             return False
         return True
     if expected == "date-time":
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])", value) is None:
+            return False
         try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return False
-        return "T" in value
+        return parsed.utcoffset() is not None
     if expected == "email":
         return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value) is not None
     return False

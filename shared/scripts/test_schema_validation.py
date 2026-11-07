@@ -8,6 +8,14 @@ import schema_validation
 
 
 class SchemaSubsetValidatorTest(unittest.TestCase):
+    def test_date_time_requires_an_unambiguous_rfc3339_instant(self):
+        schema = {"type": "string", "format": "date-time"}
+        for value in ("2026-11-06T12:00:00", "20261106T120000Z", "2026-11-06T12:00Z",
+                      "2026-11-06 12:00:00Z", "2026-11-06T12:00:00+24:00", "2026-02-30T12:00:00Z"):
+            self.assertTrue(schema_validation.validate(value, schema), value)
+        for value in ("2026-11-06T12:00:00Z", "2026-11-06T12:00:00.123-08:00", "2026-11-06T12:00:00+05:30"):
+            self.assertEqual(schema_validation.validate(value, schema), [], value)
+
     def test_nonfinite_numbers_are_rejected_even_in_open_objects(self):
         for raw in ("NaN", "Infinity", "-Infinity", "1e999"):
             value = json.loads(raw)
