@@ -209,7 +209,7 @@ It supports exactly one clean Python application shape: one non-streaming offici
 recognized `client=None` injection hook and, at most, one directly coupled test file. It verifies the
 official immutable bundle, classifies the repository without importing it, reuses the bounded
 fast scanner, preserves the callable signature, generates the fixed `/v1/execute` adapter and coupled
-test when required, validates the narrow patch, and persists `waiting_for_human` only on a complete
+test when required, compiles it without execution, validates the narrow patch, and persists `waiting_for_human` only on a complete
 pass. It reads no credential and grants no authority.
 
 Do not search the web, consult or cite saved memory, enumerate bundle files, inspect verifier source,
@@ -217,10 +217,13 @@ inspect bundle history, run the release verifier separately, rediscover the seam
 contract, regenerate the integration, handle setup state separately, rerun the scanner, repeat
 validation or tests, or add intermediate narration on a recognized golden path.
 
-When the result is `ready_for_human`, review the bounded unified diff carried in its `diff` result. If
-`diff_truncated` is `false`, do not rerun `git diff`. If it is `true`, run exactly one targeted
-`git diff` over `validation.changed_paths` before the gate. Do not remove this independent narrow-diff
-review. Render the canonical First human gate block verbatim, substituting only the helper-established
+When the result is `ready_for_human`, its `diff` result contains only counts and digests: inspect the
+helper's diff digest and per-file statistics. The helper deliberately omits source text because source
+diffs can contain credentials. Have the human review the exact local diff in their editor, or with one
+targeted local `git diff` over `validation.changed_paths` in their own terminal, before continuing.
+Keep source hunks and literal defaults out of model conversation, stdout reports, and logs; do not
+print or copy that source into the chat. Do not remove this independent narrow-diff review.
+Render the canonical First human gate block verbatim, substituting only the helper-established
 `PATH`, then wait. The deterministic helper's golden path is OpenAI-only; do not reuse its guided
 dashboard sequence for another provider. The helper result is source-inspected local preparation
 only; it is not runtime evidence.
@@ -271,9 +274,11 @@ allows it; never broaden the helper's claimed support from resemblance alone.
    `summarize(text, *, model=None)` merely because the implementation no longer uses the injected
    provider client internally. Compatibility must not preserve a hook that can bypass Keel: when an
    existing provider-client hook is used by a directly relevant caller or test and cannot safely keep
-   its behavior through Keel, inspect the directly relevant caller/test statically before the gate.
-   Defer runtime compatibility checks until isolated post-gate validation. If static review shows a
-   callable contract change is necessary, stop for explicit human direction instead of recording
+   its behavior through Keel, prepare and compile that one focused test without importing the
+   application or invoking it, and inspect the directly relevant caller/test statically before the gate.
+   Defer runtime compatibility checks until isolated post-gate validation; runtime compatibility remains
+   unverified before the gate. If static review shows a callable contract change is necessary,
+   stop for explicit human direction instead of recording
    `waiting_for_human`.
    Before the first gate, modify only the production integration path and an unavoidable dependency
    manifest when the existing runtime has no suitable HTTP facility. Do not add or edit application
@@ -775,6 +780,12 @@ python3 -I "$BUNDLE/keel-setup/scripts/inventory.py" --root .
 
 Cover model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
 background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
+
+The inventory caps traversal at 10,000 entries, 512 directories, 24 directory levels, 2,000 files,
+16 MB read, 20,000 lines per file, 1,000 matches, ten seconds, and 512 KB of output. Skipped
+dependency/build trees are pruned. When any cap is reached the helper refuses with a nonzero exit
+instead of emitting a partial inventory; a refusal establishes no discovery. Inspect smaller roots
+to continue and carry the refusal into the handoff.
 
 Update application setup documentation here when the repository needs it. Protocol-double and
 documentation work remain required assurance where relevant; only their ordering moved.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "scripts" / "inventory.py"
 SPEC = importlib.util.spec_from_file_location("inventory", SCRIPT)
@@ -47,6 +50,79 @@ def report():
 
 
 class InventoryTest(unittest.TestCase):
+    def test_skipped_tree_is_pruned_before_enumeration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "node_modules").mkdir()
+            (root / "server.py").write_text("OpenAI()")
+            original = inventory.os.scandir
+            def checked(path):
+                self.assertNotIn("node_modules", pathlib.Path(path).parts)
+                return original(path)
+            with mock.patch.object(inventory.os, "scandir", side_effect=checked):
+                self.assertEqual([item["path"] for item in inventory.inspect(root)["paths"]], ["server.py"])
+
+    def test_oversized_files_are_skipped_before_read_and_reads_are_charged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index in range(10):
+                (root / f"file{index}.py").write_bytes(b"x" * 20)
+            with mock.patch.object(inventory, "MAX_FILE_BYTES", 5), \
+                 mock.patch.object(inventory, "_source_text", wraps=inventory._source_text) as read:
+                self.assertEqual(inventory.inspect(root)["paths"], [])
+            read.assert_not_called()
+            # Bytes actually read are charged, so growth after stat() cannot exceed the bound.
+            budget = [30]
+            inventory._source_text(root / "file0.py", budget)
+            self.assertEqual(budget, [10])
+            with self.assertRaises(ValueError):
+                inventory._source_text(root / "file1.py", budget)
+
+    def test_maximum_emitted_inventory_still_passes_coverage_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "server.py").write_text("OpenAI()\n" * inventory.MAX_SCAN_MATCHES)
+            result = inventory.inspect(root)
+            self.assertEqual(len(result["paths"]), inventory.MAX_SCAN_MATCHES)
+            self.assertEqual(inventory.validate_coverage(result), [])
+            self.assertLessEqual(len(json.dumps(result, indent=2, sort_keys=True).encode()), inventory.MAX_OUTPUT_BYTES)
+            (root / "server.py").write_text("OpenAI()\n" * (inventory.MAX_SCAN_MATCHES + 1))
+            with self.assertRaises(ValueError):
+                inventory.inspect(root)
+
+    def test_aggregate_limits_refuse_instead_of_emitting_a_partial_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "server.py").write_text("OpenAI()\n" * 20)
+            (root / "nested").mkdir()
+            for constant, limit in (("MAX_SCAN_MATCHES", 2), ("MAX_SCAN_ENTRIES", 0), ("MAX_SCAN_FILES", 0),
+                                    ("MAX_SCAN_BYTES", 5), ("MAX_SCAN_SECONDS", -1), ("MAX_OUTPUT_BYTES", 4100),
+                                    ("MAX_SCAN_DEPTH", 0), ("MAX_SCAN_DIRECTORIES", 0)):
+                with self.subTest(constant=constant), mock.patch.object(inventory, constant, limit):
+                    with self.assertRaises(ValueError):
+                        inventory.inspect(root)
+                    with contextlib.redirect_stdout(io.StringIO()) as stdout, \
+                         contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(inventory.main(["--root", str(root)]), 1)
+                    self.assertEqual(stdout.getvalue(), "")
+
+    def test_aggregate_limits_count_skipped_files_bytes_and_matches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index in range(12):
+                (root / f"test_skip_{index}.py").write_text("# skipped test\n")
+            with mock.patch.object(inventory, "MAX_SCAN_ENTRIES", 10):
+                result = inventory.fast_inspect(root)
+                self.assertEqual(result["decision"], "ambiguous_scan_truncated")
+                self.assertIsNone(result["selected_seam"])
+            with mock.patch.object(inventory, "MAX_SCAN_BYTES", 10), self.assertRaises(ValueError):
+                inventory.inspect(root)
+            (root / "signals.py").write_text("OpenAI()\n" * 20)
+            with mock.patch.object(inventory, "MAX_SCAN_MATCHES", 10), self.assertRaises(ValueError):
+                inventory.inspect(root)
+            with mock.patch.object(inventory, "MAX_OUTPUT_BYTES", 1100), self.assertRaises(ValueError):
+                inventory.inspect(root)
+
     def test_inventory_is_source_only_and_reports_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -380,6 +456,7 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertIn("`summarize(text, *, model=None)`", fast)
         self.assertIn("must not silently become", fast)
         self.assertIn("compatibility of the recorded callable parameters and defaults", fast)
+        self.assertIn("prepare and compile that one focused test without importing", fast)
         self.assertIn("There is no pre-gate target execution exception", fast)
         self.assertIn("Defer runtime compatibility checks until isolated post-gate validation", fast)
         self.assertIn("stop for explicit human direction", fast)
@@ -403,8 +480,10 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertIn("rediscover the seam", fast[deterministic:fallback])
         self.assertIn("handle setup state separately", fast[deterministic:fallback])
         self.assertIn("repeat\nvalidation or tests", fast[deterministic:fallback])
-        self.assertIn("`diff_truncated` is `false`, do not rerun `git diff`", fast[deterministic:fallback])
-        self.assertIn("run exactly one targeted\n`git diff`", fast[deterministic:fallback])
+        self.assertIn("diff digest and per-file statistics", fast[deterministic:fallback])
+        self.assertIn("human review the exact local diff in their editor", fast[deterministic:fallback])
+        self.assertIn("contains only counts and digests", fast[deterministic:fallback])
+        self.assertIn("targeted local `git diff`", fast[deterministic:fallback])
         for outcome in (
             "ambiguous",
             "unsupported_shape",
@@ -700,7 +779,14 @@ class PublishedHelperBoundaryTest(unittest.TestCase):
         for line in text.splitlines():
             if line.strip().startswith("python3 "):
                 self.assertRegex(line.strip(), r'^python3 -I "\$BUNDLE/[^" ]+\.py"(?: |$)')
-        for document in SKILL.parents[1].rglob("*.md"):
+        # Scan the published product roots, plus the public README in the release
+        # bundle (marked by SOURCE.json); private source specs are never published.
+        bundle_root = SKILL.parents[1]
+        documents = [document for top in ("keel-setup", "keel-policy", "shared")
+                     for document in (bundle_root / top).rglob("*.md")]
+        if (bundle_root / "SOURCE.json").is_file():
+            documents.append(bundle_root / "README.md")
+        for document in documents:
             for line in document.read_text().splitlines():
                 if line.strip().startswith("python3 ") and ".py" in line:
                     self.assertTrue(line.strip().startswith("python3 -I "),

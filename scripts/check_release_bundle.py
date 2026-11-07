@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_VERSION = "2026-10-22.1"
-PRODUCT_SOURCE_SHA256 = "513568419e76edf18ee1fa494d7c080ecb8ce96f9dfb9832aed6a1334edfe719"
+PRODUCT_SOURCE_SHA256 = "7481bc4de5400d2dd00af9cbe6c449d090dac7806a90fdb7d144e65195bdf293"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -70,7 +70,9 @@ EXPECTED_FILES = {
     "shared/CONSTITUTION.md",
     "shared/feedback-report.schema.json",
     "shared/feedback-report.template.md",
+    "shared/scripts/bounded_input.py",
     "shared/scripts/schema_validation.py",
+    "shared/scripts/test_bounded_input.py",
     "shared/scripts/test_schema_validation.py",
     "shared/scripts/test_validate_feedback_report.py",
     "shared/scripts/validate_feedback_report.py",
@@ -88,12 +90,14 @@ NETWORK_RUNTIME_EXCEPTIONS = frozenset(
 def _files() -> set[str]:
     result: set[str] = set()
     for path in ROOT.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+        if ".git" in path.relative_to(ROOT).parts:
             continue
-        if ".pytest_cache" in path.parts:
-            continue
+        if path.name in {"__pycache__", ".pytest_cache"} or path.suffix in {".pyc", ".pyo"}:
+            raise ValueError("executable caches are not allowed in the release bundle")
         if path.is_symlink():
             raise ValueError(f"symlink is not allowed in the release bundle: {path}")
+        if not path.is_file():
+            continue
         result.add(path.relative_to(ROOT).as_posix())
     return result
 

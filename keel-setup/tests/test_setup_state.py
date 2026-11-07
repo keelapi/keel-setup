@@ -59,6 +59,26 @@ def _write_prepared(path: pathlib.Path) -> None:
 
 
 class SchemaTest(unittest.TestCase):
+    def test_state_reads_refuse_unsafe_files_and_bounded_json(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "state.json"
+            for raw in (b"x" * (setup_state.MAX_STATE_BYTES + 1), b"[" * 40 + b"0" + b"]" * 40):
+                path.write_bytes(raw)
+                with self.assertRaises(ValueError):
+                    setup_state.read_state(path, root)
+            path.unlink()
+            os.mkfifo(path)
+            with self.assertRaises(ValueError):
+                setup_state.read_state(path, root)
+            path.unlink()
+            path.symlink_to(root.parent / "outside-state.json")
+            with self.assertRaises(OSError):
+                setup_state.read_state(path, root)
+            with self.assertRaises(ValueError):
+                setup_state.read_state(root.parent / "outside-state.json", root)
+
     def test_shipped_shape_validates(self):
         self.assertEqual(setup_state.validate_state(_valid()), [])
 
@@ -206,11 +226,60 @@ class CadenceTest(unittest.TestCase):
 
 
 class BeginTest(unittest.TestCase):
+    def test_literal_pathspec_filename_cannot_borrow_an_unrelated_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            magic = ":(glob)*.py"
+            (root / magic).write_text("# /v1/execute\n")
+            (root / "other.py").write_text("# baseline\n")
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "-qm", "literal path fixture"], check=True, capture_output=True)
+            (root / "other.py").write_text("# unrelated edit\n")
+            state = _waiting_state(application_revision=setup_state.current_revision(root), changed_paths=[magic])
+            path = root / ".keel/setup-state.json"
+            path.write_text(json.dumps(state))
+            result = setup_state.begin(path, root)
+            self.assertEqual(result["continuity"], "lost", result)
+            self.assertTrue(any("not changed" in error for error in result["refusals"]))
+
+    def test_clean_or_stale_preparation_cannot_resume_the_human_gate(self):
+        for stale in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = self._repo(directory)
+                source = root / "service.py"
+                _write_prepared(source)
+                revision = setup_state.current_revision(root)
+                if stale:
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                    "commit", "--allow-empty", "-qm", "new head"], check=True, capture_output=True)
+                else:
+                    subprocess.run(["git", "-C", str(root), "add", "service.py"], check=True, capture_output=True)
+                    subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                                    "commit", "-qm", "existing route"], check=True, capture_output=True)
+                    revision = setup_state.current_revision(root)
+                path = root / ".keel/setup-state.json"
+                path.write_text(json.dumps(_waiting_state(application_revision=revision)))
+                result = setup_state.begin(path, root)
+                self.assertEqual(result["continuity"], "lost", result)
+                self.assertEqual(result["stage"], "discovery")
+
+    def test_every_recorded_path_is_checked_after_the_first_integration_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            _write_prepared(root / "service.py")
+            state = _waiting_state(application_revision=setup_state.current_revision(root),
+                                   changed_paths=["service.py", "missing.py"])
+            self.assertTrue(any("does not exist" in error for error in setup_state.validate_prepared_paths(state, root)))
+
     def _repo(self, directory: str) -> pathlib.Path:
         root = pathlib.Path(directory)
         (root / ".keel").mkdir()
         (root / ".gitignore").write_text(".keel/\n")
         subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
         return root
 
     def test_missing_file_reports_lost_continuity_and_starts_at_one(self):
@@ -226,6 +295,22 @@ class BeginTest(unittest.TestCase):
         self.assertEqual(stored["invocation_count"], 1)
         self.assertIn("prior_run_success", report["does_not_establish"])
         self.assertEqual(report["evidence_level"], "unresolved")
+
+    def test_schema_valid_large_state_round_trips_through_writer_and_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            path = root / ".keel/setup-state.json"
+            state = setup_state.initial_state()
+            state["discovered_mcp_source_identifiers"] = [f"source-{index:03d}-" + "x" * 190 for index in range(400)]
+            self.assertEqual(setup_state.validate_state(state), [])
+            setup_state.write_state_atomically(path, state, root)
+            self.assertGreater(path.stat().st_size, 65_536)
+            self.assertEqual(setup_state.begin(path, root)["continuity"], "resumed")
+            before = path.read_bytes()
+            with mock.patch.object(setup_state, "MAX_STATE_BYTES", 100):
+                with self.assertRaises(ValueError):
+                    setup_state.write_state_atomically(path, state, root)
+            self.assertEqual(path.read_bytes(), before)
 
     def test_invalid_json_reports_lost_continuity_without_inferring_success(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -274,7 +359,7 @@ class BeginTest(unittest.TestCase):
             root = self._repo(directory)
             path = root / ".keel" / "setup-state.json"
             _write_prepared(root / "service.py")
-            path.write_text(json.dumps(_waiting_state(invocation_count=19)))
+            path.write_text(json.dumps(_waiting_state(invocation_count=19, application_revision=setup_state.current_revision(root))))
             report = setup_state.begin(path, root)
         self.assertEqual(report["next_phase"], "first_human_gate")
         self.assertEqual(report["due"], ["resume_earliest_unmet_milestone"])
@@ -295,7 +380,7 @@ class BeginTest(unittest.TestCase):
                 root,
                 provider="openai",
                 pinned_skill_ref="a" * 40,
-                application_revision="b" * 40,
+                application_revision=setup_state.current_revision(root),
                 changed_paths=["service.py", "tests/test_service.py"],
                 focused_checks=_focused_checks(),
             )
@@ -512,6 +597,9 @@ class BeginTest(unittest.TestCase):
             root = pathlib.Path(directory)
             (root / ".keel").mkdir()
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             report = setup_state.begin(path, root)
@@ -522,12 +610,42 @@ class BeginTest(unittest.TestCase):
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_relative_state_is_anchored_to_repo_from_another_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / ".gitignore").write_text(".keel/\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(setup_state.main(["--repo-root", str(root)]), 0)
+            self.assertTrue((root / ".keel/setup-state.json").is_file())
+
+    def test_outside_and_symlink_paths_refuse_before_read_or_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            root = base / "repo"
+            root.mkdir()
+            outside = base / "external"
+            outside.write_text("unchanged")
+            (root / "link").symlink_to(base, target_is_directory=True)
+            for path in (outside, pathlib.Path("../external"), pathlib.Path("link/external")):
+                with self.subTest(path=path):
+                    report = setup_state.begin(path, root)
+                    self.assertEqual(report["continuity"], "lost")
+                    self.assertFalse(report["state_persisted"])
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(setup_state.main(["--state", str(path), "--repo-root", str(root)]), 1)
+            self.assertEqual(outside.read_text(), "unchanged")
+            self.assertEqual(sorted(item.name for item in base.iterdir()), ["external", "repo"])
+
     def test_main_persists_each_successful_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             reports = []
             for _ in range(2):
@@ -545,6 +663,9 @@ class CommandLineTest(unittest.TestCase):
             root = pathlib.Path(directory)
             (root / ".keel").mkdir()
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -557,6 +678,9 @@ class CommandLineTest(unittest.TestCase):
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             with (
                 mock.patch.object(
@@ -576,7 +700,7 @@ class CommandLineTest(unittest.TestCase):
             path = pathlib.Path(directory) / "setup-state.json"
             path.write_text(json.dumps(_valid(active_mapping_hash="abc")))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                code = setup_state.main(["--validate-only", "--state", str(path)])
+                code = setup_state.main(["--validate-only", "--state", str(path), "--repo-root", directory])
         self.assertEqual(code, 1)
 
     def test_validate_only_accepts_the_shipped_shape(self):
@@ -584,7 +708,7 @@ class CommandLineTest(unittest.TestCase):
             path = pathlib.Path(directory) / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                code = setup_state.main(["--validate-only", "--state", str(path)])
+                code = setup_state.main(["--validate-only", "--state", str(path), "--repo-root", directory])
         self.assertEqual(code, 0)
 
     def test_helper_takes_no_credential_argument(self):
@@ -598,6 +722,9 @@ class CommandLineTest(unittest.TestCase):
             (root / ".keel").mkdir()
             (root / ".gitignore").write_text(".keel/\n")
             subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                            "commit", "--allow-empty", "-qm", "baseline"], check=True, capture_output=True)
             path = root / ".keel" / "setup-state.json"
             _write_prepared(root / "service.py")
             setup_state.begin(path, root)

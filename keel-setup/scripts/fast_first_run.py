@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import contextlib
 import difflib
 import importlib.util
 import hashlib
@@ -40,6 +41,10 @@ MAX_CLASSIFICATION_FILES = 400
 MAX_TEST_FILES = 50
 MAX_SOURCE_BYTES = 1_000_000
 MAX_DIFF_BYTES = 64 * 1024
+MAX_SCAN_ENTRIES = 10_000
+MAX_SCAN_DIRECTORIES = 512
+MAX_SCAN_DEPTH = 24
+MAX_SCAN_SECONDS = 10
 CLASSIFICATION_SKIP_DIRS = {
     ".git", ".hg", ".svn", ".worktrees", ".tox", ".mypy_cache", ".pytest_cache",
     "node_modules", "vendor", "dist", "build", ".venv", "venv", "__pycache__",
@@ -93,7 +98,11 @@ class GoldenSeam:
             "path": self.path.as_posix(),
             "line": self.line,
             "symbol": self.symbol,
-            "callable_signature": self.signature,
+            "callable_signature": {"parameters": [
+                {"name": item["name"], "kind": item["kind"],
+                 "default": {"required": isinstance(item["default"], dict) and item["default"].get("required") is True}}
+                for item in self.signature["parameters"]
+            ]},
             "provider": "openai",
             "sdk_shape": GOLDEN_SHAPE,
             "custom_endpoint": False,
@@ -332,19 +341,40 @@ def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
     }
 
 
+def bounded_walk(root: pathlib.Path):
+    """Bound every enumerated entry, including files later skipped by callers."""
+    started = time.monotonic()
+    stack = [(root, 0)]
+    entries_seen = directories_seen = 0
+    while stack:
+        current, depth = stack.pop()
+        directories_seen += 1
+        if depth > MAX_SCAN_DEPTH or directories_seen > MAX_SCAN_DIRECTORIES:
+            raise PipelineFailure("model_review_required", "repository exceeds traversal limits")
+        directories, filenames = [], []
+        with os.scandir(current) as entries:
+            for entry in entries:
+                entries_seen += 1
+                if entries_seen > MAX_SCAN_ENTRIES or time.monotonic() - started > MAX_SCAN_SECONDS:
+                    raise PipelineFailure("model_review_required", "repository exceeds entry or elapsed-time limit")
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(entry.name)
+                else:
+                    filenames.append(entry.name)
+        directories.sort()
+        filenames.sort()
+        yield str(current), directories, filenames
+        stack.extend((current / name, depth + 1) for name in reversed(directories))
+
+
 def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
     """Return bounded repository facts without importing or executing application code."""
 
     revision = _git(repo, "rev-parse", "HEAD")
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise PipelineFailure("model_review_required", "repository has no immutable Git revision")
-    dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
-    if dirty:
-        raise PipelineFailure(
-            "dirty_checkout",
-            "Keel will not modify existing uncommitted work automatically. Commit or stash it and retry, "
-            "use a fresh disposable checkout, or explicitly request deeper model-driven inspection.",
-        )
+    if (repo / ".keel").is_symlink() or (repo / ".keel" / "setup-state.json").is_symlink():
+        raise PipelineFailure("model_review_required", "local setup paths must not be symlinks")
 
     instruction_names = {"AGENTS.md", "CLAUDE.md", ".cursorrules", "copilot-instructions.md"}
     instructions: list[str] = []
@@ -352,7 +382,7 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
     if copilot_instructions.is_file():
         instructions.append(".github/copilot-instructions.md")
     files_considered = 0
-    for current, directories, filenames in os.walk(repo, topdown=True, followlinks=False):
+    for current, directories, filenames in bounded_walk(repo):
         directories[:] = sorted(
             name for name in directories
             if name not in CLASSIFICATION_SKIP_DIRS and not name.startswith(".")
@@ -370,6 +400,15 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
                 if len(instructions) > MAX_INSTRUCTION_FILES:
                     raise PipelineFailure("model_review_required", "repository instruction set exceeds the bounded limit")
 
+    dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
+    if dirty:
+        raise PipelineFailure(
+            "dirty_checkout",
+            "Keel will not modify existing uncommitted work automatically. Commit or stash it and retry, "
+            "use a fresh disposable checkout, or explicitly request deeper model-driven inspection.",
+        )
+
+
     manifests: list[str] = []
     for pattern in ("pyproject.toml", "requirements*.txt", "setup.py", "setup.cfg", "Pipfile"):
         manifests.extend(path.relative_to(repo).as_posix() for path in sorted(repo.glob(pattern)) if path.is_file())
@@ -382,7 +421,10 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
         try:
             if path.stat().st_size > MAX_SOURCE_BYTES:
                 raise PipelineFailure("model_review_required", "Python dependency manifest exceeds the bounded limit")
-            content = path.read_text(encoding="utf-8")
+            raw = _read_repo_file(path, repo)
+            if raw is None:
+                raise PipelineFailure("model_review_required", "Python dependency manifest disappeared")
+            content = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise PipelineFailure("model_review_required", "Python dependency manifest could not be inspected") from exc
         if re.search(r"(?im)^\s*openai(?:\[[^]]+\])?\s*(?:[<>=!~]|$)", content):
@@ -459,7 +501,7 @@ def _is_none_default(function: ast.FunctionDef, name: str) -> bool:
 def _find_coupled_tests(repo: pathlib.Path, symbol: str) -> list[pathlib.PurePosixPath]:
     matches: list[pathlib.PurePosixPath] = []
     considered = 0
-    for current, directories, filenames in os.walk(repo, topdown=True, followlinks=False):
+    for current, directories, filenames in bounded_walk(repo):
         directories[:] = sorted(
             name for name in directories
             if name not in CLASSIFICATION_SKIP_DIRS and not name.startswith(".")
@@ -477,7 +519,10 @@ def _find_coupled_tests(repo: pathlib.Path, symbol: str) -> list[pathlib.PurePos
             try:
                 if path.is_symlink() or path.stat().st_size > MAX_SOURCE_BYTES:
                     continue
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative.as_posix())
+                raw = _read_repo_file(path, repo)
+                if raw is None:
+                    raise PipelineFailure("model_review_required", "compatibility test disappeared")
+                tree = ast.parse(raw.decode("utf-8"), filename=relative.as_posix())
             except (OSError, UnicodeDecodeError, SyntaxError):
                 raise PipelineFailure("model_review_required", "a candidate compatibility test could not be parsed")
             for node in ast.walk(tree):
@@ -507,7 +552,10 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     relative = pathlib.PurePosixPath(raw_path)
     path = repo.joinpath(*relative.parts)
     try:
-        source = path.read_text(encoding="utf-8")
+        raw = _read_repo_file(path, repo)
+        if raw is None:
+            raise PipelineFailure("model_review_required", "selected source disappeared")
+        source = raw.decode("utf-8")
         tree = ast.parse(source, filename=raw_path)
     except (OSError, UnicodeDecodeError, SyntaxError) as exc:
         raise PipelineFailure("unsupported_shape", "selected Python source could not be parsed") from exc
@@ -528,6 +576,9 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     function = functions[0]
     if function.decorator_list:
         raise PipelineFailure("model_review_required", "decorated callables are outside the golden path")
+    if any((left.end_lineno or left.lineno) >= right.lineno
+           for left, right in zip(function.body, function.body[1:])):
+        raise PipelineFailure("model_review_required", "shared source lines cannot be transformed without changing behavior")
     signature_line = source.splitlines()[function.lineno - 1]
     if not signature_line.startswith("def ") or not signature_line.rstrip().endswith(":"):
         raise PipelineFailure("model_review_required", "multiline or nonstandard callable signatures require model review")
@@ -536,7 +587,7 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     if _attribute_name(call.func) != "client.responses.create":
         raise PipelineFailure("model_review_required", "Responses call receiver is an unrecognized wrapper")
     keywords = {keyword.arg: keyword.value for keyword in call.keywords if keyword.arg is not None}
-    if set(keywords) != {"model", "instructions", "input"} or call.args:
+    if set(keywords) != {"model", "instructions", "input"} or call.args or len(call.keywords) != 3:
         raise PipelineFailure("model_review_required", "Responses request arguments do not match the golden shape")
     try:
         instructions = ast.literal_eval(keywords["instructions"])
@@ -569,6 +620,12 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
         raise PipelineFailure("model_review_required", "provider construction and response mapping do not match the golden shape")
     if response_name != "response" or summary_name != "summary":
         raise PipelineFailure("model_review_required", "response variable shape is not recognized")
+    expected_constructor = ast.parse("if client is None:\n    from openai import OpenAI\n    client = OpenAI()\n").body[0]
+    expected_mapping = ast.parse("summary = response.output_text.strip()\n").body[0]
+    if (response_index != client_if_index + 1 or summary_index != response_index + 1
+            or ast.dump(function.body[client_if_index]) != ast.dump(expected_constructor)
+            or ast.dump(function.body[summary_index]) != ast.dump(expected_mapping)):
+        raise PipelineFailure("model_review_required", "provider replacement contains additional or unrecognized logic")
     constructor_calls = [node for node in ast.walk(function.body[client_if_index]) if isinstance(node, ast.Call) and _attribute_name(node.func) == "OpenAI"]
     if len(constructor_calls) != 1 or constructor_calls[0].args or constructor_calls[0].keywords:
         raise PipelineFailure("unsupported_shape", "OpenAI client is not using the default official endpoint")
@@ -653,7 +710,10 @@ def _keel_output_text(body: dict[str, Any]) -> str:
 
 def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | None]:
     path = repo.joinpath(*seam.path.parts)
-    source = path.read_text(encoding="utf-8")
+    raw = _read_repo_file(path, repo)
+    if raw is None:
+        raise PipelineFailure("model_review_required", "selected source disappeared")
+    source = raw.decode("utf-8")
     tree = ast.parse(source)
     reserved = {
         "KEEL_EXECUTE_URL", "KEEL_MAX_RESPONSE_BYTES", "KEEL_REQUEST_TIMEOUT_SECONDS",
@@ -742,7 +802,14 @@ def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | N
 def _generate_coupled_test(repo: pathlib.Path, seam: GoldenSeam) -> str:
     assert seam.coupled_test is not None
     path = repo.joinpath(*seam.coupled_test.parts)
-    original = path.read_text(encoding="utf-8")
+    raw = _read_repo_file(path, repo)
+    if raw is None:
+        raise PipelineFailure("model_review_required", "compatibility test disappeared")
+    original = raw.decode("utf-8")
+    # This whole-file migration is authorized only for the exact published
+    # fixture. Any additional test, fixture, hook, or comment requires review.
+    if hashlib.sha256(original.encode("utf-8")).hexdigest() != "bdb7e770dfe505e3efab6e6852afb70b88b38b2b6222cb451aacf25bef29592b":
+        raise PipelineFailure("model_review_required", "coupled tests differ from the exact supported fixture")
     required = (
         "class FakeResponses", "class FakeClient", "class SummarizerTests",
         "test_sends_text_to_the_selected_model", "test_rejects_empty_text_before_calling_the_provider",
@@ -895,7 +962,7 @@ def validate_patch(
         # A reduced environment and timeout do not isolate the host. Only compile
         # here; runtime compatibility requires isolated post-gate execution.
         try:
-            compile(repo.joinpath(*seam.coupled_test.parts).read_text(encoding="utf-8"),
+            compile(_read_repo_file(repo.joinpath(*seam.coupled_test.parts), repo) or b"",
                     seam.coupled_test.as_posix(), "exec")
         except (OSError, UnicodeError, SyntaxError) as exc:
             raise PipelineFailure("validation_failed", "generated compatibility test does not compile") from exc
@@ -909,14 +976,68 @@ def validate_patch(
         "freshness_at_request_time": True,
         "credential_value_absent": True,
         "changed_paths": sorted(allowed_paths),
-        "focused_compatibility_test": focused_test,
+        "focused_compatibility_test": None,
         "focused_compatibility_test_status": "deferred_requires_isolation" if focused_test else "not_applicable",
+        "prepared_compatibility_test": focused_test,
+        "runtime_compatibility": "not_executed_before_human_gate",
     }
 
 
-def _write(path: pathlib.Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+@contextlib.contextmanager
+def _mutation_parent(path: pathlib.Path, repo: pathlib.Path):
+    relative = path.relative_to(repo)
+    if not relative.parts or ".." in relative.parts:
+        raise PipelineFailure("validation_failed", "mutation path escapes the repository")
+    fd = os.open(repo.resolve(), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in relative.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd, relative.name
+    finally:
+        os.close(fd)
+
+
+def _read_repo_file(path: pathlib.Path, repo: pathlib.Path) -> bytes | None:
+    with _mutation_parent(path, repo) as (parent, name):
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        except FileNotFoundError:
+            return None
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SOURCE_BYTES:
+                raise PipelineFailure("validation_failed", "mutation target is not a bounded regular file")
+            raw = handle.read(MAX_SOURCE_BYTES + 1)
+            if len(raw) > MAX_SOURCE_BYTES:
+                raise PipelineFailure("validation_failed", "mutation target exceeds its byte limit")
+            return raw
+
+
+def _write(path: pathlib.Path, content: str, repo: pathlib.Path) -> None:
+    with _mutation_parent(path, repo) as (parent, name):
+        # Never truncate through an existing link or modify another hardlink.
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            mode = 0o644
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                raise PipelineFailure("validation_failed", "mutation target must be a nonsymlink regular file")
+            mode = stat.S_IMODE(info.st_mode)
+        temporary = f".keel-edit-{os.urandom(16).hex()}"
+        try:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent)
+            with os.fdopen(fd, "wb") as handle:
+                os.fchmod(handle.fileno(), mode)
+                handle.write(content.encode("utf-8"))
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
 
 
 def _ensure_state_ignored(repo: pathlib.Path) -> bool:
@@ -924,34 +1045,61 @@ def _ensure_state_ignored(repo: pathlib.Path) -> bool:
     if checked.returncode == 0:
         return False
     path = repo / ".gitignore"
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = (_read_repo_file(path, repo) or b"").decode("utf-8")
     suffix = "" if not existing or existing.endswith("\n") else "\n"
-    _write(path, existing + suffix + ".keel/setup-state.json\n")
+    _write(path, existing + suffix + ".keel/setup-state.json\n", repo)
     checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode != 0:
         raise PipelineFailure("validation_failed", "local setup state could not be git-ignored")
     return True
 
 
-def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | None]) -> None:
+def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | None], *, remove_state: bool = False) -> None:
     for relative, content in originals.items():
         path = repo.joinpath(*relative.parts)
         if content is None:
-            path.unlink(missing_ok=True)
+            with _mutation_parent(path, repo) as (parent, name):
+                try:
+                    os.unlink(name, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
-    state = repo / ".keel" / "setup-state.json"
-    state.unlink(missing_ok=True)
+            _write(path, content.decode("utf-8"), repo)
+    if not remove_state:
+        return
+    # Remove only state this run created: no-follow descriptors, regular file only.
+    parent = os.open(repo, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        state.parent.rmdir()
-    except OSError:
-        pass
+        try:
+            local = os.open(".keel", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        except OSError:
+            return
+        try:
+            if stat.S_ISREG(os.stat("setup-state.json", dir_fd=local, follow_symlinks=False).st_mode):
+                os.unlink("setup-state.json", dir_fd=local)
+        except OSError:
+            pass
+        finally:
+            os.close(local)
+        try:
+            os.rmdir(".keel", dir_fd=parent)
+        except OSError:
+            pass
+    finally:
+        os.close(parent)
 
 
 def _line_change_stats(before: str, after: str) -> tuple[int, int, int]:
+    if len(before.encode()) > MAX_SOURCE_BYTES or len(after.encode()) > MAX_SOURCE_BYTES:
+        raise PipelineFailure("model_review_required", "source comparison exceeds its byte limit")
     before_lines = before.splitlines()
     after_lines = after.splitlines()
+    if len(before_lines) * len(after_lines) > 250_000:
+        # Large repeated-line inputs use bounded linear multiset statistics.
+        # These counts describe content changes, not line movement.
+        removed = collections.Counter(before_lines) - collections.Counter(after_lines)
+        added = collections.Counter(after_lines) - collections.Counter(before_lines)
+        return sum(added.values()), sum(removed.values()), 0
     matcher = difflib.SequenceMatcher(
         None,
         before_lines,
@@ -996,10 +1144,10 @@ def build_diff_evidence(
     *,
     max_bytes: int = MAX_DIFF_BYTES,
 ) -> dict[str, Any]:
-    """Return a bounded, source-only unified diff for the exact changed-path allowlist."""
+    """Return metadata only; source and literal values stay in the local checkout."""
 
-    sections: list[str] = []
     stats: dict[str, dict[str, int]] = {}
+    digests: dict[str, dict[str, str]] = {}
     whitespace_only = 0
     for relative_text in sorted(allowed_paths):
         relative = pathlib.PurePosixPath(relative_text)
@@ -1008,39 +1156,22 @@ def build_diff_evidence(
             raise PipelineFailure("validation_failed", "diff evidence path was not captured before editing")
         try:
             before = original.decode("utf-8") if original is not None else ""
-            after = repo.joinpath(*relative.parts).read_text(encoding="utf-8")
+            raw = _read_repo_file(repo.joinpath(*relative.parts), repo)
+            if raw is None:
+                raise PipelineFailure("validation_failed", "diff evidence source disappeared")
+            after = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise PipelineFailure("validation_failed", "diff evidence is not bounded UTF-8 text") from exc
         insertions, deletions, whitespace = _line_change_stats(before, after)
         stats[relative_text] = {"insertions": insertions, "deletions": deletions}
         whitespace_only += whitespace
-        lines = list(
-            difflib.unified_diff(
-                before.splitlines(),
-                after.splitlines(),
-                fromfile=f"a/{relative_text}",
-                tofile=f"b/{relative_text}",
-                lineterm="",
-            )
-        )
-        if lines:
-            sections.append("\n".join(lines) + "\n")
-
-    full_diff = "".join(sections)
-    if DIFF_CREDENTIAL_SHAPE.search(full_diff):
-        raise PipelineFailure("validation_failed", "bounded diff may contain credential material")
-    encoded = full_diff.encode("utf-8")
-    truncated = len(encoded) > max_bytes
-    if truncated:
-        bounded = encoded[:max_bytes].decode("utf-8", errors="ignore")
-    else:
-        bounded = full_diff
+        digests[relative_text] = {"before_sha256": hashlib.sha256(before.encode()).hexdigest(),
+                                  "after_sha256": hashlib.sha256(after.encode()).hexdigest()}
     return {
-        "unified_diff": bounded,
         "per_file": stats,
+        "digests": digests,
         "whitespace_only_changed_lines": whitespace_only,
-        "diff_truncated": truncated,
-        "max_bytes": max_bytes,
+        "human_review": "Inspect the changed files with local git diff before approval.",
     }
 
 
@@ -1049,6 +1180,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
     timings: dict[str, float] = {}
     originals: dict[pathlib.PurePosixPath, bytes | None] = {}
     edited = False
+    state_created = False
     try:
         bundle = bundle.resolve()
         mark = time.perf_counter()
@@ -1068,21 +1200,26 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         timings["seam_discovery_ms"] = round((time.perf_counter() - mark) * 1000, 3)
 
         app_path = repo.joinpath(*seam.path.parts)
-        app_before = app_path.read_text(encoding="utf-8")
-        originals[seam.path] = app_path.read_bytes()
+        originals[seam.path] = _read_repo_file(app_path, repo)
+        if originals[seam.path] is None:
+            raise PipelineFailure("validation_failed", "selected source disappeared")
+        app_before = originals[seam.path].decode("utf-8")
         if seam.coupled_test:
             test_path = repo.joinpath(*seam.coupled_test.parts)
-            originals[seam.coupled_test] = test_path.read_bytes()
+            originals[seam.coupled_test] = _read_repo_file(test_path, repo)
         ignore_relative = pathlib.PurePosixPath(".gitignore")
         ignore_path = repo / ".gitignore"
-        originals[ignore_relative] = ignore_path.read_bytes() if ignore_path.exists() else None
+        originals[ignore_relative] = _read_repo_file(ignore_path, repo)
 
         mark = time.perf_counter()
         app_after, test_after = generate_adapter(repo, seam)
-        edited = True
-        _write(app_path, app_after)
+        _line_change_stats(app_before, app_after)
         if seam.coupled_test and test_after is not None:
-            _write(repo.joinpath(*seam.coupled_test.parts), test_after)
+            _line_change_stats(originals[seam.coupled_test].decode("utf-8"), test_after)
+        edited = True
+        _write(app_path, app_after, repo)
+        if seam.coupled_test and test_after is not None:
+            _write(repo.joinpath(*seam.coupled_test.parts), test_after, repo)
         ignore_changed = _ensure_state_ignored(repo)
         timings["adapter_generation_ms"] = round((time.perf_counter() - mark) * 1000, 3)
 
@@ -1102,6 +1239,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         initialized = setup_state.begin(state_path, repo)
         if not initialized.get("state_persisted"):
             raise PipelineFailure("validation_failed", "setup state initialization failed")
+        state_created = True
         failures = setup_state.mark_waiting_for_human(
             state_path,
             repo,
@@ -1130,7 +1268,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         }
     except PipelineFailure as exc:
         if edited:
-            _restore(repo, originals)
+            _restore(repo, originals, remove_state=state_created)
         timings["total_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return {
             "schema_version": "1.0",
@@ -1143,7 +1281,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         }
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         if edited:
-            _restore(repo, originals)
+            _restore(repo, originals, remove_state=state_created)
         timings["total_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return {
             "schema_version": "1.0",

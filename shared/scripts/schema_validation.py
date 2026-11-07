@@ -8,6 +8,7 @@ cannot silently drift behind them.
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from datetime import datetime
@@ -41,11 +42,13 @@ def _format_matches(value: str, expected: str) -> bool:
             return False
         return True
     if expected == "date-time":
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])", value) is None:
+            return False
         try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
             return False
-        return "T" in value
+        return parsed.utcoffset() is not None
     if expected == "email":
         return re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value) is not None
     return False
@@ -63,13 +66,17 @@ def _resolve_ref(reference: str, root_schema: dict[str, Any]) -> dict[str, Any] 
     return current if isinstance(current, dict) else None
 
 
-def validate(
+def _validate(
     instance: Any,
     schema: dict[str, Any],
     path: str = "$",
     *,
     root_schema: dict[str, Any] | None = None,
+    budget: list[int],
 ) -> list[str]:
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise ValueError("schema validation work limit exceeded")
     root_schema = schema if root_schema is None else root_schema
     unknown_keywords = set(schema) - SUPPORTED
     if unknown_keywords:
@@ -80,13 +87,13 @@ def validate(
         if referenced is None:
             failures.append(f"{path}: unsupported or missing schema reference {schema['$ref']!r}")
         else:
-            failures.extend(validate(instance, referenced, path, root_schema=root_schema))
+            failures.extend(_validate(instance, referenced, path, root_schema=root_schema, budget=budget))
     if "anyOf" in schema:
-        branches = [validate(instance, branch, path, root_schema=root_schema) for branch in schema["anyOf"]]
+        branches = [_validate(instance, branch, path, root_schema=root_schema, budget=budget) for branch in schema["anyOf"]]
         if not any(not branch for branch in branches):
             failures.append(f"{path}: value matches no anyOf branch")
     if "oneOf" in schema:
-        branches = [validate(instance, branch, path, root_schema=root_schema) for branch in schema["oneOf"]]
+        branches = [_validate(instance, branch, path, root_schema=root_schema, budget=budget) for branch in schema["oneOf"]]
         if sum(not branch for branch in branches) != 1:
             failures.append(f"{path}: value must match exactly one oneOf branch")
     if "const" in schema and instance != schema["const"]:
@@ -99,7 +106,7 @@ def validate(
             expected_types = [expected_types]
         if not any(_type_matches(instance, item) for item in expected_types):
             failures.append(f"{path}: expected type {' or '.join(expected_types)}")
-            return failures
+            return failures[:50]
     if isinstance(instance, dict):
         required = set(schema.get("required", []))
         for key in sorted(required - set(instance)):
@@ -110,7 +117,7 @@ def validate(
                 failures.append(f"{path}: unknown property {key!r}")
         for key, value in instance.items():
             if key in properties:
-                failures.extend(validate(value, properties[key], f"{path}.{key}", root_schema=root_schema))
+                failures.extend(_validate(value, properties[key], f"{path}.{key}", root_schema=root_schema, budget=budget))
     if isinstance(instance, list):
         if len(instance) < schema.get("minItems", 0):
             failures.append(f"{path}: has fewer than {schema['minItems']} items")
@@ -123,7 +130,7 @@ def validate(
         item_schema = schema.get("items")
         if item_schema:
             for index, value in enumerate(instance):
-                failures.extend(validate(value, item_schema, f"{path}[{index}]", root_schema=root_schema))
+                failures.extend(_validate(value, item_schema, f"{path}[{index}]", root_schema=root_schema, budget=budget))
     if isinstance(instance, str):
         if len(instance) < schema.get("minLength", 0):
             failures.append(f"{path}: is shorter than {schema['minLength']} characters")
@@ -140,4 +147,54 @@ def validate(
             failures.append(f"{path}: is above maximum {schema['maximum']}")
         if "exclusiveMinimum" in schema and instance <= schema["exclusiveMinimum"]:
             failures.append(f"{path}: is not above exclusive minimum {schema['exclusiveMinimum']}")
-    return failures
+    return failures[:50]
+
+
+def complexity_failures(instance: Any, *, max_nodes: int = 50_000,
+                        max_items: int = 2_000, max_text: int = 2_000_000) -> list[str]:
+    """Reject excessive structure before recursive schema/semantic traversal."""
+    pending = [(instance, 0)]
+    nodes = text_size = 0
+    while pending:
+        value, depth = pending.pop()
+        nodes += 1
+        if nodes > max_nodes or depth > 24:
+            return ["input exceeds node or nesting limit"]
+        if isinstance(value, (dict, list)):
+            if len(value) > max_items:
+                return ["input exceeds container item limit"]
+            if isinstance(value, dict):
+                text_size += sum(len(str(key)) for key in value)
+                children = value.values()
+            else:
+                children = value
+            pending.extend((child, depth + 1) for child in children)
+        elif isinstance(value, str):
+            text_size += len(value)
+            if len(value) > 65_536:
+                return ["input exceeds string limit"]
+        if text_size > max_text:
+            return ["input exceeds total text limit"]
+    return []
+
+
+def validate(instance: Any, schema: dict[str, Any], path: str = "$", *,
+             root_schema: dict[str, Any] | None = None) -> list[str]:
+    failures = complexity_failures(instance)
+    if failures:
+        return failures
+    # JSON numbers must be finite, including values in open objects and
+    # overflowed exponents. Check direct library callers as well as JSON.
+    pending = [(path, instance)]
+    while pending:
+        location, value = pending.pop()
+        if isinstance(value, float) and not math.isfinite(value):
+            return [f"{location}: number must be finite"]
+        if isinstance(value, dict):
+            pending.extend((f"{location}.{key}", child) for key, child in value.items())
+        elif isinstance(value, list):
+            pending.extend((f"{location}[{index}]", child) for index, child in enumerate(value))
+    try:
+        return _validate(instance, schema, path, root_schema=root_schema, budget=[50_000])[:50]
+    except (RecursionError, ValueError):
+        return ["schema validation resource limit exceeded"]

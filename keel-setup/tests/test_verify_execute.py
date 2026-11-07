@@ -80,7 +80,9 @@ def server(responses):
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{httpd.server_port}"
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        with mock.patch("builtins.input", return_value=base):
+            yield base
     finally:
         httpd.shutdown()
         thread.join()
@@ -105,6 +107,12 @@ def verification_profile(*, digest: str = "a" * 64):
 
 
 class ClassifierTest(unittest.TestCase):
+    def test_remote_codes_cannot_reflect_credentials_or_arbitrary_tokens(self):
+        for value in ("ks_abcdefghijkl", "sk_abcdefghijkl", "opaque_secret", "x" * 128, "policy.arbitrary"):
+            self.assertIsNone(verify_execute._safe_error_code(value))
+            self.assertNotIn(value, json.dumps(verify_execute.classify(401, {"error": {"code": value}})))
+        self.assertEqual(verify_execute._safe_error_code("unauthorized"), "unauthorized")
+
     def test_http_403_requires_full_tuple(self):
         denied = verify_execute.classify(
             403, {"status": "denied", "governance": {"decision": "deny"}, "error": {"stage": "permit"}}
@@ -126,6 +134,14 @@ class ClassifierTest(unittest.TestCase):
 
 
 class ProtocolDoubleTest(unittest.TestCase):
+    def test_loopback_refuses_before_reading_a_key_without_exact_confirmation(self):
+        with mock.patch.object(verify_execute, "_verify_pinned_release"), \
+             mock.patch("builtins.input", return_value="yes"), \
+             mock.patch.object(verify_execute, "_read_hidden_runtime_key") as read_key:
+            self.assertEqual(verify_execute.main(["--hidden-input", "--bundle-sha", "a" * 40,
+                "--base-url", "http://127.0.0.1:8123"]), 2)
+            read_key.assert_not_called()
+
     def test_expected_pair_uses_unique_freshness_and_messages_without_leak(self):
         allow = {"status": "completed", "governance": {"decision": "allow"}, "output": {"sensitive": "not printed"}}
         deny = {"status": "denied", "governance": {"decision": "deny"}, "error": {"stage": "permit", "code": "policy.rule_denied"}}

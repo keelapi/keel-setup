@@ -87,17 +87,41 @@ Choose one explicit mode and keep one intent ledger across it:
 
 Each handoff contains: the human intent, policy JSON when one can be drafted faithfully, an
 evaluation-order readback, an enforceability report, the activation effect (`narrows`, `widens`,
-`ambiguous`, `unchanged`, or `unresolved`), blocked requests, and the exact human next step. Validate an
-enforceability report with `scripts/validate_enforceability_report.py`. A blocked report is a successful
+`ambiguous`, `unchanged`, or `unresolved`), blocked requests, and the exact human next step. Check an
+enforceability report with `scripts/validate_enforceability_report.py`. For an embedded policy, use
+`rules[0]`, `rules[1]`, and so on as exact rule references, with one entry for each fact consumed by
+each rule. The machine report's `readback` must equal the validator's `derive_readback(policy)`;
+keep any additional friendly explanation outside that validated field. `safe_outcome` must agree
+with the referenced action. Actions whose implicit runtime facts or capabilities lack a pinned trusted
+evidence contract cannot pass offline enforceability qualification; report the missing contract
+instead of claiming support. Beyond those structural bindings, this helper checks schema and field
+provenance only; it does not verify outcomes, readback meaning, rule ordering, activation deltas, or
+runtime enforcement. Every report must set `validation_scope` to `schema_and_field_provenance_only`,
+`unverified_claims` to `["safe_outcome", "readback", "rule_order", "activation_effect", "runtime_enforcement"]`,
+and `activation_effect` to `unresolved`, because no authenticated active-policy baseline exists offline.
+Human `intent` remains a declaration for human review, not a proved policy effect. Treat `safe_outcome`
+and readback as unverified author claims. Never use a passing helper result as approval to activate
+or as proof a restriction is enforced. A blocked report is a successful
 diagnosis; never change the requested restriction to make validation pass.
 
 Every non-null embedded `policy` is validated against the committed
 `reference/policy-document.schema.json`; a legacy or approximate `when`/`decision` shape is not a
 policy proposal and must fail closed before the enforceability cross-check.
 
+Offline report input is limited to a regular file of 1,000,000 bytes, 24 nesting levels,
+10,000 nodes, and 1,000 children per container. Schema validation has a 50,000-step
+work budget and returns at most 50 schema failures. Split larger proposals before validation.
+
 The validator reads `reference/field-provenance.json`, a release-pinned machine artifact whose field
 set and provenance values are checked against the published catalog. A report cannot promote a caller-
 or connector-asserted field to `trusted` by relabelling it.
+
+Report surfaces are closed identifiers: `managed_execute`, `managed_mcp`, `realtime`, or `voice`.
+The offline helper conservatively admits trusted `provider` and `model` only on `managed_execute`,
+and trusted connector identity/tool name only on `managed_mcp`. Other field/surface combinations
+remain unresolved until the pinned availability contract is extended with route evidence. In
+particular, connector tool name is unavailable on `realtime` and `voice`; mark it unavailable or
+unresolved and block restrictions that depend on it. Provenance alone never establishes availability.
 
 1. **Get the authoring profile.** With a safe authoring-context v2 JSON block, validate it
    using the offline intake below and use its `authoring_level`: `template`, `basic`, or `full`.

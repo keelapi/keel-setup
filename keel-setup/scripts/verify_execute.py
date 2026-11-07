@@ -458,9 +458,12 @@ def _allowlisted_scalar(value: Any, allowed: frozenset[str]) -> str | None:
 
 
 def _safe_error_code(value: Any) -> str | None:
-    """Return one bounded protocol error code, never arbitrary response text."""
-
-    if not isinstance(value, str) or _SAFE_ERROR_CODE_PATTERN.fullmatch(value) is None:
+    """Render only a closed local vocabulary, never a remote token."""
+    if not isinstance(value, str) or value not in {
+        "unauthorized", "request_not_fresh", "nonce_reuse", "policy.rule_denied",
+        "verification_profile_unavailable", "verification_profile_pending", "provider_refused",
+        "no_active_policy", "rate_limited", "unavailable", "invalid_request",
+    }:
         return None
     return value
 
@@ -601,6 +604,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(str(exc), file=sys.stderr)
                 return 2
             print("Pinned Keel setup release verified.", file=sys.stderr)
+            if args.base_url != DEFAULT_BASE_URL:
+                print(f"Protocol double destination: {args.base_url}. Use a test-only credential.", file=sys.stderr)
+                try:
+                    confirmed = input("Type the exact destination URL to confirm: ")
+                except (EOFError, OSError, KeyboardInterrupt):
+                    confirmed = ""
+                if confirmed != args.base_url:
+                    print("Destination was not confirmed; no credential was read.", file=sys.stderr)
+                    return 2
             try:
                 key = _read_hidden_runtime_key()
             except (RuntimeError, KeyboardInterrupt) as exc:

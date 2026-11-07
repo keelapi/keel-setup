@@ -11,7 +11,8 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from schema_validation import validate as validate_schema
+from schema_validation import complexity_failures, validate as validate_schema
+from bounded_input import read_bytes
 
 MAX_BYTES = 16_384
 TOP_FIELDS = {
@@ -42,10 +43,15 @@ def _walk(value: Any, path: str = ""):
             yield from _walk(child, child_path)
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            yield from _walk(child, f"{path}[{index}]")
+            child_path = f"{path}[{index}]"
+            yield child_path, "", child
+            yield from _walk(child, child_path)
 
 
 def validate(report: Any, approved_context: set[str], channel: str | None) -> list[str]:
+    limits = complexity_failures(report)
+    if limits:
+        return limits
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     failures = validate_schema(report, schema)
     if not isinstance(report, dict):
@@ -84,7 +90,10 @@ def validate(report: Any, approved_context: set[str], channel: str | None) -> li
         for index, location in enumerate(locations):
             if not isinstance(location, str):
                 failures.append(f"optional_context.source_locations[{index}] must be a string")
-            elif pathlib.PurePath(location).is_absolute() or ".." in pathlib.PurePosixPath(location).parts:
+            elif (not location or "\\" in location or pathlib.PureWindowsPath(location).drive
+                  or pathlib.PurePosixPath(location).is_absolute()
+                  or ".." in pathlib.PurePosixPath(location).parts
+                  or any(ord(char) < 32 for char in location)):
                 failures.append(f"optional_context.source_locations[{index}] must be repository-relative")
     else:
         failures.append("optional_context.source_locations must be an array")
@@ -104,16 +113,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--preview", action="store_true", help="print the exact validated payload for human review")
     args = parser.parse_args(argv)
     try:
-        raw = args.report.read_bytes()
-    except OSError:
-        print("feedback report could not be read", file=sys.stderr)
+        raw = read_bytes(args.report, MAX_BYTES)
+    except (OSError, ValueError):
+        print("feedback report must be a regular file within the byte limit", file=sys.stderr)
         return 1
     if len(raw) > MAX_BYTES:
         print(f"feedback report exceeds {MAX_BYTES} bytes", file=sys.stderr)
         return 1
     try:
         report = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         print("feedback report is not valid UTF-8 JSON", file=sys.stderr)
         return 1
     failures = validate(report, set(args.approve_context), args.channel)

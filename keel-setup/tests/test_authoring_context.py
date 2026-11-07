@@ -82,7 +82,9 @@ def server(responses):
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"http://127.0.0.1:{httpd.server_port}"
+        base = f"http://127.0.0.1:{httpd.server_port}"
+        with mock.patch("builtins.input", return_value=base):
+            yield base
     finally:
         httpd.shutdown()
         thread.join()
@@ -596,6 +598,20 @@ def _run_main(argv, *, responses, entered=KEY, stdin=None):
 
 
 class CommandTest(unittest.TestCase):
+    def test_error_response_cannot_reflect_the_entered_credential(self):
+        for reflected in (KEY, KEY.lower(), "opaque_secret"):
+            with _run_main(["--bundle-sha", "a" * 40], responses=[(401, {"error": {"code": reflected}})]) as (code, out, err):
+                self.assertEqual(code, 1)
+                self.assertNotIn(reflected, out + err)
+
+    def test_loopback_refuses_before_reading_a_key_without_exact_confirmation(self):
+        with mock.patch.object(authoring_context, "_verify_pinned_release"), \
+             mock.patch("builtins.input", return_value="yes"), \
+             mock.patch.object(authoring_context, "_read_hidden_runtime_key") as read_key:
+            self.assertEqual(authoring_context.main(["--bundle-sha", "a" * 40,
+                "--base-url", "http://127.0.0.1:8123"]), 2)
+            read_key.assert_not_called()
+
     def test_successful_run_prints_one_json_block(self):
         with _run_main(["--bundle-sha", "a" * 40], responses=[(200, context())]) as (
             code,

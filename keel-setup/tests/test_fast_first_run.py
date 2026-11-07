@@ -41,6 +41,23 @@ def _git(root: pathlib.Path, *args: str) -> str:
 
 
 class DeterministicFastFirstRunTest(unittest.TestCase):
+    @unittest.skipUnless((ROOT / "scripts/check_release_bundle.py").is_file(),
+                         "the release checker is a publication-layer file of the public bundle")
+    def test_fallback_release_checker_rejects_bytecode_and_cache_entries(self):
+        checker = _load("fallback_bundle_check", ROOT / "scripts/check_release_bundle.py")
+        for relative in ("shared/scripts/__pycache__/schema_validation.pyc", "shared/scripts/schema_validation.pyc",
+                         "shared/scripts/__pycache__"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.name == "__pycache__":
+                    path.mkdir()
+                else:
+                    path.write_bytes(b"unmeasured executable cache")
+                with mock.patch.object(checker, "ROOT", root), self.assertRaisesRegex(ValueError, "caches"):
+                    checker._files()
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.bundle_temp = tempfile.TemporaryDirectory()
@@ -54,6 +71,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
             "keel-policy/scripts/consume_authoring_context.py",
             "keel-policy/scripts/validate_enforceability_report.py",
             "shared/scripts/schema_validation.py",
+            "shared/scripts/bounded_input.py",
             "shared/scripts/validate_feedback_report.py",
         ):
             target = cls.bundle / relative
@@ -185,6 +203,56 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                 self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), before)
                 self.assertIn("total_ms", result["timings"])
 
+    def test_dangling_external_state_link_is_untouched_by_preparation_and_rollback(self):
+        root = self._repo()
+        with tempfile.TemporaryDirectory() as directory:
+            external = pathlib.Path(directory)
+            state = external / "setup-state.json"
+            state.symlink_to(external / "does-not-exist")
+            (root / ".keel").symlink_to(external, target_is_directory=True)
+            _git(root, "add", ".keel")
+            _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "state link")
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertTrue(state.is_symlink())
+            fast._restore(root, {}, remove_state=True)
+            self.assertTrue(state.is_symlink())
+            self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
+    def test_tracked_gitignore_symlink_refuses_without_touching_external_file(self):
+        root = self._repo()
+        with tempfile.TemporaryDirectory() as directory:
+            external = pathlib.Path(directory) / "external"
+            external.write_text("external content\n")
+            (root / ".gitignore").unlink()
+            (root / ".gitignore").symlink_to(external)
+            _git(root, "add", ".gitignore")
+            _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "link")
+            before = external.stat()
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "validation_failed", result)
+            self.assertEqual(external.read_text(), "external content\n")
+            self.assertEqual(external.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+            # Rollback refuses to replace the link and never writes through it.
+            with self.assertRaises(fast.PipelineFailure):
+                fast._restore(root, {pathlib.PurePosixPath(".gitignore"): b"restored\n"})
+            self.assertEqual(external.read_text(), "external content\n")
+            self.assertTrue((root / ".gitignore").is_symlink())
+
+    def test_extra_statements_in_replaced_span_force_refusal_without_edits(self):
+        variants = [
+            fixtures.GOLDEN_APP.replace("    response = client.responses.create(", "    authorize_user()\n    response = client.responses.create("),
+            fixtures.GOLDEN_APP.replace("    summary = response.output_text.strip()", "    audit_response(response)\n    summary = response.output_text.strip()"),
+            fixtures.GOLDEN_APP.replace("        client = OpenAI()", "        cleanup()\n        client = OpenAI()"),
+            fixtures.GOLDEN_APP.replace("    if client is None:", "    if client is None or needs_refresh():"),
+        ]
+        for source in variants:
+            root = self._repo(source)
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertEqual((root / "app.py").read_text(), source)
+            self.assertEqual(_git(root, "status", "--porcelain=v1"), "")
     def test_pre_gate_validation_does_not_execute_target_initialization(self):
         for entrypoint in ("tests/__init__.py", "app.py", "sitecustomize.py"):
             with self.subTest(entrypoint=entrypoint):
@@ -345,7 +413,39 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["outcome"], "ready_for_human", result)
         self.assertEqual(fast.callable_signature(before_fn), fast.callable_signature(after_fn))
         client = next(item for item in result["seam"]["callable_signature"]["parameters"] if item["name"] == "client")
-        self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": None})
+        self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": {"required": False}})
+
+    def test_dangling_gitignore_is_refused_without_external_write_or_link_removal(self):
+        for existing in (False, True):
+            root = self._repo()
+            with tempfile.TemporaryDirectory() as outside:
+                destination = pathlib.Path(outside) / "target"
+                if existing:
+                    destination.write_text("preserve")
+                ignore = root / ".gitignore"
+                ignore.unlink()
+                ignore.symlink_to(destination)
+                _git(root, "add", ".gitignore")
+                _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "symlink fixture")
+                before = (root / "app.py").read_bytes()
+                result = self._run(root)
+                self.assertEqual(result["outcome"], "validation_failed", result)
+                self.assertTrue(ignore.is_symlink())
+                self.assertEqual(destination.exists(), existing)
+                if existing:
+                    self.assertEqual(destination.read_text(), "preserve")
+                self.assertEqual((root / "app.py").read_bytes(), before)
+
+    def test_atomic_mutation_preserves_existing_permissions_under_a_restrictive_umask(self):
+        root = self._repo()
+        path = root / "app.py"
+        path.chmod(0o664)
+        previous = os.umask(0o077)
+        try:
+            fast._write(path, "# changed\n", root)
+        finally:
+            os.umask(previous)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o664)
 
     def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
@@ -357,9 +457,22 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertIn("FakeClient", test_source)
         self.assertIn("https://api.keelapi.com/v1/execute", test_source)
         self.assertEqual(
-            result["validation"]["focused_compatibility_test"],
+            result["validation"]["prepared_compatibility_test"],
             "tests.test_app.SummarizerTests.test_sends_text_to_the_selected_model",
         )
+
+    def test_automatic_preparation_never_runs_customer_initializers_or_callable(self):
+        source = fixtures.GOLDEN_APP.replace("import os", "import os\nfrom pathlib import Path\nPath('module-sentinel').touch()")
+        source = source.replace("    source = text.strip()", "    Path('call-sentinel').touch()\n    source = text.strip()")
+        root = self._repo(source)
+        (root / "tests/__init__.py").write_text("from pathlib import Path\nPath('package-sentinel').touch()\n")
+        _git(root, "add", ".")
+        _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "sentinels")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertIsNone(result["validation"]["focused_compatibility_test"])
+        for name in ("module-sentinel", "package-sentinel", "call-sentinel"):
+            self.assertFalse((root / name).exists(), name)
 
     def test_regression_generated_adapter_accepts_normalized_execute_text(self):
         root = self._repo()
@@ -466,6 +579,39 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertIn(retained, after)
         compile(after, "app.py", "exec")
 
+    def test_unrecognized_security_logic_and_extra_tests_are_preserved_by_refusal(self):
+        for source in (
+            fixtures.GOLDEN_APP.replace("    summary = response.output_text.strip()", "    audit_request()\n    summary = response.output_text.strip()"),
+            fixtures.GOLDEN_APP.replace("        client = OpenAI()", "        authorize_user()\n        client = OpenAI()"),
+            fixtures.GOLDEN_APP.replace("    response = client.responses.create(", "    authorize_user()\n    response = client.responses.create("),
+        ):
+            root = self._repo(source)
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertEqual((root / "app.py").read_text(), source)
+            self.assertEqual(_git(root, "status", "--porcelain"), "")
+        root = self._repo()
+        path = root / "tests/test_app.py"
+        source = path.read_text() + "\ndef test_extra_authorization():\n    assert authorized()\n"
+        path.write_text(source)
+        _git(root, "add", ".")
+        _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "extra test")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual(path.read_text(), source)
+        self.assertEqual(_git(root, "status", "--porcelain"), "")
+
+    def test_same_line_response_mapping_and_return_are_refused_without_changes(self):
+        source = fixtures.GOLDEN_APP.replace(
+            '    summary = response.output_text.strip()\n    if not summary:\n        raise ValueError("The model returned an empty summary.")\n    return summary',
+            '    summary = response.output_text.strip(); return summary',
+        )
+        root = self._repo(source, with_test=False)
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual((root / "app.py").read_text(), source)
+        self.assertEqual(_git(root, "status", "--porcelain"), "")
+
     def test_retained_try_except_block_is_copied_verbatim_and_compiles(self):
         root = self._repo(fixtures.RETAINED_TRY_EXCEPT_APP)
         retained = '''    try:
@@ -495,24 +641,16 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["outcome"], "ready_for_human", result)
         self.assertEqual(result["seam"]["directly_coupled_test"], "tests/test_app.py")
 
-    def test_ready_result_emits_exact_bounded_diff_and_stats(self):
+    def test_ready_result_emits_only_local_review_metadata(self):
         root = self._repo()
 
         result = self._run(root)
 
         self.assertEqual(result["outcome"], "ready_for_human", result)
         evidence = result["diff"]
-        self.assertFalse(evidence["diff_truncated"])
-        self.assertLessEqual(len(evidence["unified_diff"].encode("utf-8")), fast.MAX_DIFF_BYTES)
+        self.assertNotIn("unified_diff", evidence)
         self.assertIsInstance(evidence["whitespace_only_changed_lines"], int)
-        checked = subprocess.run(
-            ["git", "-C", str(root), "apply", "--check", "--reverse", "-"],
-            input=evidence["unified_diff"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertEqual(set(evidence["digests"]), set(result["validation"]["changed_paths"]))
         numstat = _git(root, "diff", "--numstat", "--", *result["validation"]["changed_paths"])
         expected = {
             path: {"insertions": int(insertions), "deletions": int(deletions)}
@@ -528,7 +666,29 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
 
         self.assertEqual((insertions, deletions, whitespace_only), (1, 1, 2))
 
-    def test_oversized_diff_is_explicitly_truncated(self):
+    def test_repeated_line_statistics_and_skipped_entries_are_bounded(self):
+        before = "repeat\n" * 20_000
+        after = "repeat\n" * 19_999 + "changed\n"
+        with mock.patch.object(fast.difflib, "SequenceMatcher", side_effect=AssertionError("quadratic comparison")):
+            self.assertEqual(fast._line_change_stats(before, after), (1, 1, 0))
+        root = self._repo()
+        for index in range(12):
+            (root / f"ignored-{index}.bin").write_bytes(b"ignored")
+        with mock.patch.object(fast, "MAX_SCAN_ENTRIES", 10):
+            result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
+    def test_ignored_compatibility_fifo_is_refused_without_blocking_or_editing(self):
+        root = self._repo()
+        path = root / "tests/test_fifo.py"
+        os.mkfifo(path)
+        (root / ".git/info/exclude").write_text("tests/test_fifo.py\n")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "validation_failed", result)
+        self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
+    def test_large_source_is_never_embedded_in_metadata(self):
         root = self._repo()
         result = self._run(root)
         allowed = set(result["validation"]["changed_paths"])
@@ -546,9 +706,29 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
 
         evidence = fast.build_diff_evidence(root, allowed, originals)
 
-        self.assertTrue(evidence["diff_truncated"])
-        self.assertLessEqual(len(evidence["unified_diff"].encode("utf-8")), fast.MAX_DIFF_BYTES)
-        self.assertEqual(evidence["max_bytes"], fast.MAX_DIFF_BYTES)
+        self.assertNotIn("unified_diff", evidence)
+        self.assertNotIn("bounded-diff-fixture", json.dumps(evidence))
+        self.assertLess(len(json.dumps(evidence)), 4096)
+
+    def test_opaque_source_and_literal_defaults_never_leave_the_checkout(self):
+        sentinel = "unrecognized-opaque-example-93457"
+        source = fixtures.GOLDEN_APP.replace("model: str | None = None", f"model: str | None = {sentinel!r}")
+        source = source.replace("source = text.strip()", f"source = text.strip()  # {sentinel}")
+        root = self._repo(source)
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertNotIn(sentinel, json.dumps(result))
+        self.assertIn(sentinel, (root / "app.py").read_text())
+
+    def test_source_credentials_never_appear_in_structured_output(self):
+        samples = ["Authorization: Bearer synthetic-bearer-value", "github_pat_synthetic_example_123456789",
+                   "-----BEGIN PRIVATE KEY-----synthetic-----END PRIVATE KEY-----",
+                   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJleGFtcGxlIn0.synthetic_signature"]
+        for value in samples:
+            root = self._repo(fixtures.GOLDEN_APP.replace("    response =", f"    # {value}\n    response ="))
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "ready_for_human", result)
+            self.assertNotIn(value, json.dumps(result))
 
     def test_custom_base_url_is_safe_fallback(self):
         root = self._repo(fixtures.CUSTOM_BASE_URL_APP)
