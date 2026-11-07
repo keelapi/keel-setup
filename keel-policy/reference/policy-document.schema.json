@@ -139,16 +139,9 @@
           "title": "Email"
         },
         "external_workflow": {
-          "anyOf": [
-            {
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
+          "type": "null",
           "default": null,
-          "title": "External Workflow"
+          "description": "No closed external workflow contract is published in this offline bundle."
         },
         "group_id": {
           "anyOf": [
@@ -278,7 +271,292 @@
         "timeout_seconds"
       ],
       "title": "ApprovalRequirement",
-      "type": "object"
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "org_role"
+            },
+            "role": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "role"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "approver_group"
+            },
+            "group_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "group_id"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "approver_group"
+            },
+            "group_slug": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "group_slug"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "team"
+            },
+            "team_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "team_id"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "team"
+            },
+            "team_slug": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "team_slug"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "user"
+            },
+            "user_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "user_id"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "email"
+            },
+            "email": {
+              "format": "email",
+              "type": "string"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "service_principal_id": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "email"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "service_principal"
+            },
+            "service_principal_id": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "email": {
+              "type": "null"
+            },
+            "group_id": {
+              "type": "null"
+            },
+            "group_slug": {
+              "type": "null"
+            },
+            "role": {
+              "type": "null"
+            },
+            "team_id": {
+              "type": "null"
+            },
+            "team_slug": {
+              "type": "null"
+            },
+            "user_id": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "service_principal_id"
+          ]
+        }
+      ]
     },
     "AttestationRequirement": {
       "additionalProperties": false,

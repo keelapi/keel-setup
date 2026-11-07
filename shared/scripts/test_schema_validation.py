@@ -8,6 +8,25 @@ import schema_validation
 
 
 class SchemaSubsetValidatorTest(unittest.TestCase):
+    def test_approval_selectors_are_closed_and_bound_to_their_type(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        policy_schema = json.loads((root / "keel-policy/reference/policy-document.schema.json").read_text())
+        schema = policy_schema["$defs"]["ApprovalRequirement"]
+        identifier = "12345678-1234-4234-8234-123456789abc"
+        choices = {"org_role": ("role", "admin"), "approver_group": ("group_id", identifier),
+                   "team": ("team_slug", "reviewers"), "user": ("user_id", identifier),
+                   "email": ("email", "review@example.invalid"), "service_principal": ("service_principal_id", identifier)}
+        for kind, (selector, value) in choices.items():
+            base = {"type": kind, "timeout_seconds": 60}
+            self.assertTrue(schema_validation.validate(base, schema))
+            valid = {**base, selector: value}
+            self.assertEqual(schema_validation.validate(valid, schema), [], kind)
+            other = "role" if selector != "role" else "email"
+            self.assertTrue(schema_validation.validate({**valid, other: "admin"}, schema))
+            self.assertTrue(schema_validation.validate({**valid, "external_workflow": {"unexpected": True}}, schema))
+        self.assertTrue(schema_validation.validate({"type": "approver_group", "timeout_seconds": 60,
+            "group_id": identifier, "group_slug": "reviewers"}, schema))
+
     def test_date_time_requires_an_unambiguous_rfc3339_instant(self):
         schema = {"type": "string", "format": "date-time"}
         for value in ("2026-11-06T12:00:00", "20261106T120000Z", "2026-11-06T12:00Z",
