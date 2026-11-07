@@ -383,6 +383,17 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                     self.assertEqual(destination.read_text(), "preserve")
                 self.assertEqual((root / "app.py").read_bytes(), before)
 
+    def test_atomic_mutation_preserves_existing_permissions_under_a_restrictive_umask(self):
+        root = self._repo()
+        path = root / "app.py"
+        path.chmod(0o664)
+        previous = os.umask(0o077)
+        try:
+            fast._write(path, "# changed\n", root)
+        finally:
+            os.umask(previous)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o664)
+
     def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
         result = self._run(root)

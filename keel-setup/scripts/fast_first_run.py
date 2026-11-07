@@ -1026,6 +1026,7 @@ def _write(path: pathlib.Path, content: str, repo: pathlib.Path) -> None:
         try:
             fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent)
             with os.fdopen(fd, "wb") as handle:
+                os.fchmod(handle.fileno(), mode)
                 handle.write(content.encode("utf-8"))
             os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
         finally:
