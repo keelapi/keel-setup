@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_VERSION = "2026-10-22.1"
-PRODUCT_SOURCE_SHA256 = "e309304aeba024135756b81fbe38378c98d7eef49d809ee3abe76b4e3c9956a0"
+PRODUCT_SOURCE_SHA256 = "9121c2e3aef2356472d8c1eb3bd5bd4cb3bf501e064d629bc124f16758a89ba7"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",

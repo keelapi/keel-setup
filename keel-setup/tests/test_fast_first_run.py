@@ -373,7 +373,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                 ignore.unlink()
                 ignore.symlink_to(destination)
                 _git(root, "add", ".gitignore")
-                _git(root, "commit", "-qm", "symlink fixture")
+                _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "symlink fixture")
                 before = (root / "app.py").read_bytes()
                 result = self._run(root)
                 self.assertEqual(result["outcome"], "validation_failed", result)
@@ -529,7 +529,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         source = path.read_text() + "\ndef test_extra_authorization():\n    assert authorized()\n"
         path.write_text(source)
         _git(root, "add", ".")
-        _git(root, "commit", "-qm", "extra test")
+        _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "extra test")
         result = self._run(root)
         self.assertEqual(result["outcome"], "model_review_required", result)
         self.assertEqual(path.read_text(), source)
