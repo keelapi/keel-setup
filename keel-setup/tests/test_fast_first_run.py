@@ -578,6 +578,28 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
 
         self.assertEqual((insertions, deletions, whitespace_only), (1, 1, 2))
 
+    def test_repeated_line_statistics_and_skipped_entries_are_bounded(self):
+        before = "repeat\n" * 20_000
+        after = "repeat\n" * 19_999 + "changed\n"
+        with mock.patch.object(fast.difflib, "SequenceMatcher", side_effect=AssertionError("quadratic comparison")):
+            self.assertEqual(fast._line_change_stats(before, after), (1, 1, 0))
+        root = self._repo()
+        for index in range(12):
+            (root / f"ignored-{index}.bin").write_bytes(b"ignored")
+        with mock.patch.object(fast, "MAX_SCAN_ENTRIES", 10):
+            result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
+    def test_ignored_compatibility_fifo_is_refused_without_blocking_or_editing(self):
+        root = self._repo()
+        path = root / "tests/test_fifo.py"
+        os.mkfifo(path)
+        (root / ".git/info/exclude").write_text("tests/test_fifo.py\n")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "validation_failed", result)
+        self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
     def test_large_source_is_never_embedded_in_metadata(self):
         root = self._repo()
         result = self._run(root)

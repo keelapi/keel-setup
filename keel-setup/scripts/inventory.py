@@ -13,6 +13,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -27,6 +28,15 @@ from schema_validation import validate as validate_schema  # noqa: E402
 COVERAGE_SCHEMA = ROOT / "keel-setup" / "reference" / "coverage.schema.json"
 
 MAX_FILE_BYTES = 1_000_000
+MAX_SCAN_ENTRIES = 10_000
+MAX_SCAN_DIRECTORIES = 512
+MAX_SCAN_DEPTH = 24
+MAX_SCAN_SECONDS = 10
+MAX_SCAN_FILES = 2_000
+MAX_SCAN_BYTES = 16_000_000
+MAX_SCAN_MATCHES = 1_000
+MAX_OUTPUT_BYTES = 512_000
+MAX_SOURCE_LINES = 20_000
 FAST_MAX_FILES = 400
 FAST_MAX_CANDIDATES = 20
 SKIP_DIRS = {
@@ -116,45 +126,64 @@ def revision(root: pathlib.Path) -> str | None:
     return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
 
 
-def iter_source_files(root: pathlib.Path):
-    for path in sorted(root.rglob("*")):
-        try:
-            relative = path.relative_to(root)
-        except ValueError:
-            continue
-        if any(part in SKIP_DIRS for part in relative.parts) or path.is_symlink() or not path.is_file():
-            continue
-        if path.suffix.lower() not in TEXT_SUFFIXES:
-            continue
-        try:
-            if path.stat().st_size > MAX_FILE_BYTES:
+def bounded_walk(root: pathlib.Path):
+    """Bound every enumerated entry, including files later skipped by callers."""
+    started = time.monotonic()
+    stack = [(root, 0)]
+    entries_seen = directories_seen = 0
+    while stack:
+        current, depth = stack.pop()
+        directories_seen += 1
+        if depth > MAX_SCAN_DEPTH or directories_seen > MAX_SCAN_DIRECTORIES:
+            raise ValueError("repository exceeds traversal limits")
+        directories, filenames = [], []
+        with os.scandir(current) as entries:
+            for entry in entries:
+                entries_seen += 1
+                if entries_seen > MAX_SCAN_ENTRIES or time.monotonic() - started > MAX_SCAN_SECONDS:
+                    raise ValueError("repository exceeds entry or elapsed-time limit")
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(entry.name)
+                else:
+                    filenames.append(entry.name)
+        directories.sort()
+        filenames.sort()
+        yield str(current), directories, filenames
+        stack.extend((current / name, depth + 1) for name in reversed(directories))
+
+
+def iter_source_files(root: pathlib.Path, *, fast: bool = False):
+    total_bytes = 0
+    files_seen = 0
+    for current, directories, filenames in bounded_walk(root):
+        directories[:] = [name for name in directories if name not in SKIP_DIRS and (not fast or not name.startswith("."))]
+        for filename in filenames:
+            path = pathlib.Path(current) / filename
+            if path.is_symlink() or path.suffix.lower() not in TEXT_SUFFIXES:
                 continue
-        except OSError:
-            continue
-        yield path, relative
+            info = path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE_BYTES:
+                continue
+            files_seen += 1
+            total_bytes += info.st_size
+            if files_seen > MAX_SCAN_FILES or total_bytes > MAX_SCAN_BYTES:
+                raise ValueError("repository exceeds aggregate file or byte limit")
+            yield path, path.relative_to(root)
 
 
 def iter_fast_source_files(root: pathlib.Path):
-    """Yield shallow-search candidates without materializing the whole tree."""
+    yield from iter_source_files(root, fast=True)
 
-    for current, directories, filenames in os.walk(root, topdown=True, followlinks=False):
-        directories[:] = sorted(
-            name
-            for name in directories
-            if name not in SKIP_DIRS and not name.startswith(".")
-        )
-        current_path = pathlib.Path(current)
-        for filename in sorted(filenames):
-            path = current_path / filename
-            if path.is_symlink() or path.suffix.lower() not in TEXT_SUFFIXES:
-                continue
-            try:
-                if path.stat().st_size > MAX_FILE_BYTES:
-                    continue
-                relative = path.relative_to(root)
-            except (OSError, ValueError):
-                continue
-            yield path, relative
+
+def _source_text(path: pathlib.Path) -> str:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("source must be a regular file")
+        raw = stream.read(MAX_FILE_BYTES + 1)
+    if len(raw) > MAX_FILE_BYTES or raw.count(b"\n") > MAX_SOURCE_LINES:
+        raise ValueError("source exceeds bounded size or line limit")
+    return raw.decode("utf-8")
 
 
 def _is_test_path(relative: pathlib.PurePath) -> bool:
@@ -218,7 +247,7 @@ def _python_custom_base_url_reasons(tree: ast.AST, provider: str) -> list[str]:
 
 def _python_candidates(path: pathlib.Path, relative: pathlib.PurePath) -> list[dict[str, Any]]:
     try:
-        source = path.read_text(encoding="utf-8")
+        source = _source_text(path)
         tree = ast.parse(source, filename=relative.as_posix())
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []
@@ -281,7 +310,7 @@ def _python_candidates(path: pathlib.Path, relative: pathlib.PurePath) -> list[d
 
 def _javascript_candidates(path: pathlib.Path, relative: pathlib.PurePath) -> list[dict[str, Any]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _source_text(path).splitlines()
     except (OSError, UnicodeDecodeError):
         return []
     source = "\n".join(lines)
@@ -337,7 +366,7 @@ def _provider_signal_candidates(
     """Find bounded raw-provider or import signals omitted by SDK call matching."""
 
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = _source_text(path).splitlines()
     except (OSError, UnicodeDecodeError):
         return []
     source = "\n".join(lines)
@@ -401,27 +430,31 @@ def fast_inspect(
     test_files_skipped = 0
     sensitive_paths_skipped = 0
     truncated = False
-    for path, relative in iter_fast_source_files(root):
-        if SENSITIVE_PATH_PATTERN.search(relative.as_posix()):
-            sensitive_paths_skipped += 1
-            continue
-        if _is_test_path(relative):
-            test_files_skipped += 1
-            continue
-        if files_considered >= max_files or len(candidates) >= max_candidates:
-            truncated = True
-            break
-        files_considered += 1
-        sdk_candidates: list[dict[str, Any]] = []
-        if path.suffix.lower() == ".py":
-            sdk_candidates = _python_candidates(path, relative)
-        elif path.suffix.lower() in FAST_SOURCE_SUFFIXES:
-            sdk_candidates = _javascript_candidates(path, relative)
-        candidates.extend(sdk_candidates)
-        candidates.extend(_provider_signal_candidates(path, relative, sdk_candidates))
-        if len(candidates) > max_candidates:
-            truncated = True
-            break
+    try:
+        for path, relative in iter_fast_source_files(root):
+            if SENSITIVE_PATH_PATTERN.search(relative.as_posix()):
+                sensitive_paths_skipped += 1
+                continue
+            if _is_test_path(relative):
+                test_files_skipped += 1
+                continue
+            if files_considered >= max_files or len(candidates) >= max_candidates:
+                truncated = True
+                break
+            files_considered += 1
+            sdk_candidates: list[dict[str, Any]] = []
+            if path.suffix.lower() == ".py":
+                sdk_candidates = _python_candidates(path, relative)
+            elif path.suffix.lower() in FAST_SOURCE_SUFFIXES:
+                sdk_candidates = _javascript_candidates(path, relative)
+            candidates.extend(sdk_candidates)
+            candidates.extend(_provider_signal_candidates(path, relative, sdk_candidates))
+            if len(candidates) > max_candidates:
+                truncated = True
+                break
+
+    except ValueError:
+        truncated = True
 
     candidates = candidates[:max_candidates]
     sdk_candidates = [item for item in candidates if item["request_kind"] == "sdk_request"]
@@ -473,15 +506,18 @@ def fast_inspect(
 
 def inspect(root: pathlib.Path) -> dict[str, Any]:
     paths: list[dict[str, Any]] = []
+    output_bytes = 1024
     for path, relative in iter_source_files(root):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = _source_text(path).splitlines()
         except (OSError, UnicodeDecodeError):
             continue
         for line_number, line in enumerate(lines, 1):
             for surface, pattern, signal in PATTERNS:
                 if not pattern.search(line):
                     continue
+                if len(paths) >= MAX_SCAN_MATCHES:
+                    raise ValueError("inventory exceeds its match limit")
                 paths.append(
                     {
                         "path": relative.as_posix(),
@@ -494,6 +530,9 @@ def inspect(root: pathlib.Path) -> dict[str, Any]:
                         "uncertainties": ["source signal is not trusted runtime semantics"],
                     }
                 )
+                output_bytes += len(json.dumps(paths[-1]).encode("utf-8"))
+                if output_bytes > MAX_OUTPUT_BYTES:
+                    raise ValueError("inventory exceeds its output limit")
     return {
         "schema_version": "1.0",
         "report_basis": "source_inventory",
@@ -574,7 +613,12 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(json.dumps(fast_inspect(root, max_files=args.max_files, max_candidates=args.max_candidates), indent=2, sort_keys=True))
         return 0
-    print(json.dumps(inspect(root), indent=2, sort_keys=True))
+    try:
+        result = inspect(root)
+    except (OSError, ValueError):
+        print("inventory refused: repository exceeds bounded inspection limits", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

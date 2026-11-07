@@ -41,6 +41,10 @@ MAX_CLASSIFICATION_FILES = 400
 MAX_TEST_FILES = 50
 MAX_SOURCE_BYTES = 1_000_000
 MAX_DIFF_BYTES = 64 * 1024
+MAX_SCAN_ENTRIES = 10_000
+MAX_SCAN_DIRECTORIES = 512
+MAX_SCAN_DEPTH = 24
+MAX_SCAN_SECONDS = 10
 CLASSIFICATION_SKIP_DIRS = {
     ".git", ".hg", ".svn", ".worktrees", ".tox", ".mypy_cache", ".pytest_cache",
     "node_modules", "vendor", "dist", "build", ".venv", "venv", "__pycache__",
@@ -337,19 +341,38 @@ def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
     }
 
 
+def bounded_walk(root: pathlib.Path):
+    """Bound every enumerated entry, including files later skipped by callers."""
+    started = time.monotonic()
+    stack = [(root, 0)]
+    entries_seen = directories_seen = 0
+    while stack:
+        current, depth = stack.pop()
+        directories_seen += 1
+        if depth > MAX_SCAN_DEPTH or directories_seen > MAX_SCAN_DIRECTORIES:
+            raise PipelineFailure("model_review_required", "repository exceeds traversal limits")
+        directories, filenames = [], []
+        with os.scandir(current) as entries:
+            for entry in entries:
+                entries_seen += 1
+                if entries_seen > MAX_SCAN_ENTRIES or time.monotonic() - started > MAX_SCAN_SECONDS:
+                    raise PipelineFailure("model_review_required", "repository exceeds entry or elapsed-time limit")
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(entry.name)
+                else:
+                    filenames.append(entry.name)
+        directories.sort()
+        filenames.sort()
+        yield str(current), directories, filenames
+        stack.extend((current / name, depth + 1) for name in reversed(directories))
+
+
 def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
     """Return bounded repository facts without importing or executing application code."""
 
     revision = _git(repo, "rev-parse", "HEAD")
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise PipelineFailure("model_review_required", "repository has no immutable Git revision")
-    dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
-    if dirty:
-        raise PipelineFailure(
-            "dirty_checkout",
-            "Keel will not modify existing uncommitted work automatically. Commit or stash it and retry, "
-            "use a fresh disposable checkout, or explicitly request deeper model-driven inspection.",
-        )
 
     instruction_names = {"AGENTS.md", "CLAUDE.md", ".cursorrules", "copilot-instructions.md"}
     instructions: list[str] = []
@@ -357,7 +380,7 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
     if copilot_instructions.is_file():
         instructions.append(".github/copilot-instructions.md")
     files_considered = 0
-    for current, directories, filenames in os.walk(repo, topdown=True, followlinks=False):
+    for current, directories, filenames in bounded_walk(repo):
         directories[:] = sorted(
             name for name in directories
             if name not in CLASSIFICATION_SKIP_DIRS and not name.startswith(".")
@@ -375,6 +398,15 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
                 if len(instructions) > MAX_INSTRUCTION_FILES:
                     raise PipelineFailure("model_review_required", "repository instruction set exceeds the bounded limit")
 
+    dirty = _git(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines()
+    if dirty:
+        raise PipelineFailure(
+            "dirty_checkout",
+            "Keel will not modify existing uncommitted work automatically. Commit or stash it and retry, "
+            "use a fresh disposable checkout, or explicitly request deeper model-driven inspection.",
+        )
+
+
     manifests: list[str] = []
     for pattern in ("pyproject.toml", "requirements*.txt", "setup.py", "setup.cfg", "Pipfile"):
         manifests.extend(path.relative_to(repo).as_posix() for path in sorted(repo.glob(pattern)) if path.is_file())
@@ -387,7 +419,10 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
         try:
             if path.stat().st_size > MAX_SOURCE_BYTES:
                 raise PipelineFailure("model_review_required", "Python dependency manifest exceeds the bounded limit")
-            content = path.read_text(encoding="utf-8")
+            raw = _read_repo_file(path, repo)
+            if raw is None:
+                raise PipelineFailure("model_review_required", "Python dependency manifest disappeared")
+            content = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise PipelineFailure("model_review_required", "Python dependency manifest could not be inspected") from exc
         if re.search(r"(?im)^\s*openai(?:\[[^]]+\])?\s*(?:[<>=!~]|$)", content):
@@ -464,7 +499,7 @@ def _is_none_default(function: ast.FunctionDef, name: str) -> bool:
 def _find_coupled_tests(repo: pathlib.Path, symbol: str) -> list[pathlib.PurePosixPath]:
     matches: list[pathlib.PurePosixPath] = []
     considered = 0
-    for current, directories, filenames in os.walk(repo, topdown=True, followlinks=False):
+    for current, directories, filenames in bounded_walk(repo):
         directories[:] = sorted(
             name for name in directories
             if name not in CLASSIFICATION_SKIP_DIRS and not name.startswith(".")
@@ -482,7 +517,10 @@ def _find_coupled_tests(repo: pathlib.Path, symbol: str) -> list[pathlib.PurePos
             try:
                 if path.is_symlink() or path.stat().st_size > MAX_SOURCE_BYTES:
                     continue
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative.as_posix())
+                raw = _read_repo_file(path, repo)
+                if raw is None:
+                    raise PipelineFailure("model_review_required", "compatibility test disappeared")
+                tree = ast.parse(raw.decode("utf-8"), filename=relative.as_posix())
             except (OSError, UnicodeDecodeError, SyntaxError):
                 raise PipelineFailure("model_review_required", "a candidate compatibility test could not be parsed")
             for node in ast.walk(tree):
@@ -512,7 +550,10 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     relative = pathlib.PurePosixPath(raw_path)
     path = repo.joinpath(*relative.parts)
     try:
-        source = path.read_text(encoding="utf-8")
+        raw = _read_repo_file(path, repo)
+        if raw is None:
+            raise PipelineFailure("model_review_required", "selected source disappeared")
+        source = raw.decode("utf-8")
         tree = ast.parse(source, filename=raw_path)
     except (OSError, UnicodeDecodeError, SyntaxError) as exc:
         raise PipelineFailure("unsupported_shape", "selected Python source could not be parsed") from exc
@@ -664,7 +705,10 @@ def _keel_output_text(body: dict[str, Any]) -> str:
 
 def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | None]:
     path = repo.joinpath(*seam.path.parts)
-    source = path.read_text(encoding="utf-8")
+    raw = _read_repo_file(path, repo)
+    if raw is None:
+        raise PipelineFailure("model_review_required", "selected source disappeared")
+    source = raw.decode("utf-8")
     tree = ast.parse(source)
     reserved = {
         "KEEL_EXECUTE_URL", "KEEL_MAX_RESPONSE_BYTES", "KEEL_REQUEST_TIMEOUT_SECONDS",
@@ -753,7 +797,10 @@ def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | N
 def _generate_coupled_test(repo: pathlib.Path, seam: GoldenSeam) -> str:
     assert seam.coupled_test is not None
     path = repo.joinpath(*seam.coupled_test.parts)
-    original = path.read_text(encoding="utf-8")
+    raw = _read_repo_file(path, repo)
+    if raw is None:
+        raise PipelineFailure("model_review_required", "compatibility test disappeared")
+    original = raw.decode("utf-8")
     # This whole-file migration is authorized only for the exact published
     # fixture. Any additional test, fixture, hook, or comment requires review.
     if hashlib.sha256(original.encode("utf-8")).hexdigest() != "bdb7e770dfe505e3efab6e6852afb70b88b38b2b6222cb451aacf25bef29592b":
@@ -910,7 +957,7 @@ def validate_patch(
         # A reduced environment and timeout do not isolate the host. Only compile
         # here; runtime compatibility requires isolated post-gate execution.
         try:
-            compile(repo.joinpath(*seam.coupled_test.parts).read_text(encoding="utf-8"),
+            compile(_read_repo_file(repo.joinpath(*seam.coupled_test.parts), repo) or b"",
                     seam.coupled_test.as_posix(), "exec")
         except (OSError, UnicodeError, SyntaxError) as exc:
             raise PipelineFailure("validation_failed", "generated compatibility test does not compile") from exc
@@ -1023,8 +1070,16 @@ def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | 
 
 
 def _line_change_stats(before: str, after: str) -> tuple[int, int, int]:
+    if len(before.encode()) > MAX_SOURCE_BYTES or len(after.encode()) > MAX_SOURCE_BYTES:
+        raise PipelineFailure("model_review_required", "source comparison exceeds its byte limit")
     before_lines = before.splitlines()
     after_lines = after.splitlines()
+    if len(before_lines) * len(after_lines) > 250_000:
+        # Large repeated-line inputs use bounded linear multiset statistics.
+        # These counts describe content changes, not line movement.
+        removed = collections.Counter(before_lines) - collections.Counter(after_lines)
+        added = collections.Counter(after_lines) - collections.Counter(before_lines)
+        return sum(added.values()), sum(removed.values()), 0
     matcher = difflib.SequenceMatcher(
         None,
         before_lines,
@@ -1081,7 +1136,10 @@ def build_diff_evidence(
             raise PipelineFailure("validation_failed", "diff evidence path was not captured before editing")
         try:
             before = original.decode("utf-8") if original is not None else ""
-            after = repo.joinpath(*relative.parts).read_text(encoding="utf-8")
+            raw = _read_repo_file(repo.joinpath(*relative.parts), repo)
+            if raw is None:
+                raise PipelineFailure("validation_failed", "diff evidence source disappeared")
+            after = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             raise PipelineFailure("validation_failed", "diff evidence is not bounded UTF-8 text") from exc
         insertions, deletions, whitespace = _line_change_stats(before, after)
@@ -1121,8 +1179,10 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         timings["seam_discovery_ms"] = round((time.perf_counter() - mark) * 1000, 3)
 
         app_path = repo.joinpath(*seam.path.parts)
-        app_before = app_path.read_text(encoding="utf-8")
         originals[seam.path] = _read_repo_file(app_path, repo)
+        if originals[seam.path] is None:
+            raise PipelineFailure("validation_failed", "selected source disappeared")
+        app_before = originals[seam.path].decode("utf-8")
         if seam.coupled_test:
             test_path = repo.joinpath(*seam.coupled_test.parts)
             originals[seam.coupled_test] = _read_repo_file(test_path, repo)
@@ -1132,6 +1192,9 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
 
         mark = time.perf_counter()
         app_after, test_after = generate_adapter(repo, seam)
+        _line_change_stats(app_before, app_after)
+        if seam.coupled_test and test_after is not None:
+            _line_change_stats(originals[seam.coupled_test].decode("utf-8"), test_after)
         edited = True
         _write(app_path, app_after, repo)
         if seam.coupled_test and test_after is not None:

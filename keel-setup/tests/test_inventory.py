@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "scripts" / "inventory.py"
 SPEC = importlib.util.spec_from_file_location("inventory", SCRIPT)
@@ -47,6 +48,23 @@ def report():
 
 
 class InventoryTest(unittest.TestCase):
+    def test_aggregate_limits_count_skipped_files_bytes_and_matches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for index in range(12):
+                (root / f"test_skip_{index}.py").write_text("# skipped test\n")
+            with mock.patch.object(inventory, "MAX_SCAN_ENTRIES", 10):
+                result = inventory.fast_inspect(root)
+                self.assertEqual(result["decision"], "ambiguous_scan_truncated")
+                self.assertIsNone(result["selected_seam"])
+            with mock.patch.object(inventory, "MAX_SCAN_BYTES", 10), self.assertRaises(ValueError):
+                inventory.inspect(root)
+            (root / "signals.py").write_text("OpenAI()\n" * 20)
+            with mock.patch.object(inventory, "MAX_SCAN_MATCHES", 10), self.assertRaises(ValueError):
+                inventory.inspect(root)
+            with mock.patch.object(inventory, "MAX_OUTPUT_BYTES", 1100), self.assertRaises(ValueError):
+                inventory.inspect(root)
+
     def test_inventory_is_source_only_and_reports_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -403,8 +421,8 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertIn("rediscover the seam", fast[deterministic:fallback])
         self.assertIn("handle setup state separately", fast[deterministic:fallback])
         self.assertIn("repeat\nvalidation or tests", fast[deterministic:fallback])
-        self.assertIn("`diff_truncated` is `false`, do not rerun `git diff`", fast[deterministic:fallback])
-        self.assertIn("run exactly one targeted\n`git diff`", fast[deterministic:fallback])
+        self.assertIn("contains only counts and digests", fast[deterministic:fallback])
+        self.assertIn("targeted local `git diff`", fast[deterministic:fallback])
         for outcome in (
             "ambiguous",
             "unsupported_shape",
