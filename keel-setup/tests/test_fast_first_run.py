@@ -524,6 +524,17 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(path.read_text(), source)
         self.assertEqual(_git(root, "status", "--porcelain"), "")
 
+    def test_same_line_response_mapping_and_return_are_refused_without_changes(self):
+        source = fixtures.GOLDEN_APP.replace(
+            '    summary = response.output_text.strip()\n    if not summary:\n        raise ValueError("The model returned an empty summary.")\n    return summary',
+            '    summary = response.output_text.strip(); return summary',
+        )
+        root = self._repo(source, with_test=False)
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual((root / "app.py").read_text(), source)
+        self.assertEqual(_git(root, "status", "--porcelain"), "")
+
     def test_retained_try_except_block_is_copied_verbatim_and_compiles(self):
         root = self._repo(fixtures.RETAINED_TRY_EXCEPT_APP)
         retained = '''    try:

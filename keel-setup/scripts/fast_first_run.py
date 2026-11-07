@@ -574,6 +574,9 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     function = functions[0]
     if function.decorator_list:
         raise PipelineFailure("model_review_required", "decorated callables are outside the golden path")
+    if any((left.end_lineno or left.lineno) >= right.lineno
+           for left, right in zip(function.body, function.body[1:])):
+        raise PipelineFailure("model_review_required", "shared source lines cannot be transformed without changing behavior")
     signature_line = source.splitlines()[function.lineno - 1]
     if not signature_line.startswith("def ") or not signature_line.rstrip().endswith(":"):
         raise PipelineFailure("model_review_required", "multiline or nonstandard callable signatures require model review")
