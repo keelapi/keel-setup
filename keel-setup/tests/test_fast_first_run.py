@@ -347,6 +347,27 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         client = next(item for item in result["seam"]["callable_signature"]["parameters"] if item["name"] == "client")
         self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": {"required": False}})
 
+    def test_dangling_gitignore_is_refused_without_external_write_or_link_removal(self):
+        for existing in (False, True):
+            root = self._repo()
+            with tempfile.TemporaryDirectory() as outside:
+                destination = pathlib.Path(outside) / "target"
+                if existing:
+                    destination.write_text("preserve")
+                ignore = root / ".gitignore"
+                ignore.unlink()
+                ignore.symlink_to(destination)
+                _git(root, "add", ".gitignore")
+                _git(root, "commit", "-qm", "symlink fixture")
+                before = (root / "app.py").read_bytes()
+                result = self._run(root)
+                self.assertEqual(result["outcome"], "validation_failed", result)
+                self.assertTrue(ignore.is_symlink())
+                self.assertEqual(destination.exists(), existing)
+                if existing:
+                    self.assertEqual(destination.read_text(), "preserve")
+                self.assertEqual((root / "app.py").read_bytes(), before)
+
     def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
         result = self._run(root)

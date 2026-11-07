@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import ast
 import collections
+import contextlib
 import difflib
 import importlib.util
 import hashlib
@@ -918,9 +919,60 @@ def validate_patch(
     }
 
 
-def _write(path: pathlib.Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+@contextlib.contextmanager
+def _mutation_parent(path: pathlib.Path, repo: pathlib.Path):
+    relative = path.relative_to(repo)
+    if not relative.parts or ".." in relative.parts:
+        raise PipelineFailure("validation_failed", "mutation path escapes the repository")
+    fd = os.open(repo.resolve(), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in relative.parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd, relative.name
+    finally:
+        os.close(fd)
+
+
+def _read_repo_file(path: pathlib.Path, repo: pathlib.Path) -> bytes | None:
+    with _mutation_parent(path, repo) as (parent, name):
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        except FileNotFoundError:
+            return None
+        with os.fdopen(fd, "rb") as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SOURCE_BYTES:
+                raise PipelineFailure("validation_failed", "mutation target is not a bounded regular file")
+            raw = handle.read(MAX_SOURCE_BYTES + 1)
+            if len(raw) > MAX_SOURCE_BYTES:
+                raise PipelineFailure("validation_failed", "mutation target exceeds its byte limit")
+            return raw
+
+
+def _write(path: pathlib.Path, content: str, repo: pathlib.Path) -> None:
+    with _mutation_parent(path, repo) as (parent, name):
+        # Never truncate through an existing link or modify another hardlink.
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            mode = 0o644
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                raise PipelineFailure("validation_failed", "mutation target must be a nonsymlink regular file")
+            mode = stat.S_IMODE(info.st_mode)
+        temporary = f".keel-edit-{os.urandom(16).hex()}"
+        try:
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=parent)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(content.encode("utf-8"))
+            os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        finally:
+            try:
+                os.unlink(temporary, dir_fd=parent)
+            except FileNotFoundError:
+                pass
 
 
 def _ensure_state_ignored(repo: pathlib.Path) -> bool:
@@ -928,9 +980,9 @@ def _ensure_state_ignored(repo: pathlib.Path) -> bool:
     if checked.returncode == 0:
         return False
     path = repo / ".gitignore"
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    existing = (_read_repo_file(path, repo) or b"").decode("utf-8")
     suffix = "" if not existing or existing.endswith("\n") else "\n"
-    _write(path, existing + suffix + ".keel/setup-state.json\n")
+    _write(path, existing + suffix + ".keel/setup-state.json\n", repo)
     checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode != 0:
         raise PipelineFailure("validation_failed", "local setup state could not be git-ignored")
@@ -941,12 +993,19 @@ def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | 
     for relative, content in originals.items():
         path = repo.joinpath(*relative.parts)
         if content is None:
-            path.unlink(missing_ok=True)
+            with _mutation_parent(path, repo) as (parent, name):
+                try:
+                    os.unlink(name, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
         else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
+            _write(path, content.decode("utf-8"), repo)
     state = repo / ".keel" / "setup-state.json"
-    state.unlink(missing_ok=True)
+    try:
+        with _mutation_parent(state, repo) as (parent, name):
+            os.unlink(name, dir_fd=parent)
+    except FileNotFoundError:
+        pass
     try:
         state.parent.rmdir()
     except OSError:
@@ -1053,20 +1112,20 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
 
         app_path = repo.joinpath(*seam.path.parts)
         app_before = app_path.read_text(encoding="utf-8")
-        originals[seam.path] = app_path.read_bytes()
+        originals[seam.path] = _read_repo_file(app_path, repo)
         if seam.coupled_test:
             test_path = repo.joinpath(*seam.coupled_test.parts)
-            originals[seam.coupled_test] = test_path.read_bytes()
+            originals[seam.coupled_test] = _read_repo_file(test_path, repo)
         ignore_relative = pathlib.PurePosixPath(".gitignore")
         ignore_path = repo / ".gitignore"
-        originals[ignore_relative] = ignore_path.read_bytes() if ignore_path.exists() else None
+        originals[ignore_relative] = _read_repo_file(ignore_path, repo)
 
         mark = time.perf_counter()
         app_after, test_after = generate_adapter(repo, seam)
         edited = True
-        _write(app_path, app_after)
+        _write(app_path, app_after, repo)
         if seam.coupled_test and test_after is not None:
-            _write(repo.joinpath(*seam.coupled_test.parts), test_after)
+            _write(repo.joinpath(*seam.coupled_test.parts), test_after, repo)
         ignore_changed = _ensure_state_ignored(repo)
         timings["adapter_generation_ms"] = round((time.perf_counter() - mark) * 1000, 3)
 
