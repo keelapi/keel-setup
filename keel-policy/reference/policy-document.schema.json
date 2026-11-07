@@ -140,8 +140,7 @@
         },
         "external_workflow": {
           "type": "null",
-          "default": null,
-          "description": "No closed external workflow contract is published in this offline bundle."
+          "default": null
         },
         "group_id": {
           "anyOf": [

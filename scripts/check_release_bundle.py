@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_VERSION = "2026-10-22.1"
-PRODUCT_SOURCE_SHA256 = "9121c2e3aef2356472d8c1eb3bd5bd4cb3bf501e064d629bc124f16758a89ba7"
+PRODUCT_SOURCE_SHA256 = "7481bc4de5400d2dd00af9cbe6c449d090dac7806a90fdb7d144e65195bdf293"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -70,7 +70,9 @@ EXPECTED_FILES = {
     "shared/CONSTITUTION.md",
     "shared/feedback-report.schema.json",
     "shared/feedback-report.template.md",
+    "shared/scripts/bounded_input.py",
     "shared/scripts/schema_validation.py",
+    "shared/scripts/test_bounded_input.py",
     "shared/scripts/test_schema_validation.py",
     "shared/scripts/test_validate_feedback_report.py",
     "shared/scripts/validate_feedback_report.py",

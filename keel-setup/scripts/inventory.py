@@ -175,12 +175,18 @@ def iter_fast_source_files(root: pathlib.Path):
     yield from iter_source_files(root, fast=True)
 
 
-def _source_text(path: pathlib.Path) -> str:
+def _source_text(path: pathlib.Path, read_budget: list[int] | None = None) -> str:
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
             raise ValueError("source must be a regular file")
         raw = stream.read(MAX_FILE_BYTES + 1)
+    if read_budget is not None:
+        # Charge bytes actually read, so files that grow after stat() cannot
+        # exceed the aggregate bound.
+        read_budget[0] -= len(raw)
+        if read_budget[0] < 0:
+            raise ValueError("repository exceeds aggregate read limit")
     if len(raw) > MAX_FILE_BYTES or raw.count(b"\n") > MAX_SOURCE_LINES:
         raise ValueError("source exceeds bounded size or line limit")
     return raw.decode("utf-8")
@@ -506,10 +512,12 @@ def fast_inspect(
 
 def inspect(root: pathlib.Path) -> dict[str, Any]:
     paths: list[dict[str, Any]] = []
-    output_bytes = 1024
+    # Budget the printed (indented) form, with headroom for the envelope.
+    output_bytes = 4096
+    read_budget = [MAX_SCAN_BYTES]
     for path, relative in iter_source_files(root):
         try:
-            lines = _source_text(path).splitlines()
+            lines = _source_text(path, read_budget).splitlines()
         except (OSError, UnicodeDecodeError):
             continue
         for line_number, line in enumerate(lines, 1):
@@ -530,7 +538,7 @@ def inspect(root: pathlib.Path) -> dict[str, Any]:
                         "uncertainties": ["source signal is not trusted runtime semantics"],
                     }
                 )
-                output_bytes += len(json.dumps(paths[-1]).encode("utf-8"))
+                output_bytes += len(json.dumps(paths[-1], indent=2, sort_keys=True).encode("utf-8")) + 100
                 if output_bytes > MAX_OUTPUT_BYTES:
                     raise ValueError("inventory exceeds its output limit")
     return {

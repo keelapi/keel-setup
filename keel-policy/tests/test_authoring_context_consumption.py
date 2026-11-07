@@ -259,6 +259,8 @@ class JourneyTests(unittest.TestCase):
                 status='trusted', safe_outcome='deny', reason='Published Keel-derived model/provider contract.', replacement_field=None)
                 for index, field in ((0, 'provider'), (1, 'provider'), (1, 'model'))],
             'activation_effect': 'unresolved', 'blocked_requests': [],
+            'validation_scope': 'schema_and_field_provenance_only',
+            'unverified_claims': ['safe_outcome', 'readback', 'rule_order', 'activation_effect', 'runtime_enforcement'],
             'human_next_step': out['handoff'],
         }
         failures = validator.validate(report, read('tools/public_surface.json'),

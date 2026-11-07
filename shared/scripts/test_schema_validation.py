@@ -8,6 +8,11 @@ import schema_validation
 
 
 class SchemaSubsetValidatorTest(unittest.TestCase):
+    def test_recursive_schema_and_failure_output_are_bounded(self):
+        schema = {"$ref": "#/$defs/cycle", "$defs": {"cycle": {"$ref": "#/$defs/cycle"}}}
+        self.assertTrue(schema_validation.validate({}, schema))
+        errors = schema_validation.validate(["wrong"] * 1000, {"type": "array", "items": {"type": "integer"}})
+        self.assertEqual(len(errors), 50)
     def test_approval_selectors_are_closed_and_bound_to_their_type(self):
         root = pathlib.Path(__file__).resolve().parents[2]
         policy_schema = json.loads((root / "keel-policy/reference/policy-document.schema.json").read_text())

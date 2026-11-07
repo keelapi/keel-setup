@@ -296,6 +296,22 @@ class BeginTest(unittest.TestCase):
         self.assertIn("prior_run_success", report["does_not_establish"])
         self.assertEqual(report["evidence_level"], "unresolved")
 
+    def test_schema_valid_large_state_round_trips_through_writer_and_reader(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self._repo(directory)
+            path = root / ".keel/setup-state.json"
+            state = setup_state.initial_state()
+            state["discovered_mcp_source_identifiers"] = [f"source-{index:03d}-" + "x" * 190 for index in range(400)]
+            self.assertEqual(setup_state.validate_state(state), [])
+            setup_state.write_state_atomically(path, state, root)
+            self.assertGreater(path.stat().st_size, 65_536)
+            self.assertEqual(setup_state.begin(path, root)["continuity"], "resumed")
+            before = path.read_bytes()
+            with mock.patch.object(setup_state, "MAX_STATE_BYTES", 100):
+                with self.assertRaises(ValueError):
+                    setup_state.write_state_atomically(path, state, root)
+            self.assertEqual(path.read_bytes(), before)
+
     def test_invalid_json_reports_lost_continuity_without_inferring_success(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self._repo(directory)
@@ -594,6 +610,33 @@ class BeginTest(unittest.TestCase):
 
 
 class CommandLineTest(unittest.TestCase):
+    def test_relative_state_is_anchored_to_repo_from_another_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / ".gitignore").write_text(".keel/\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(setup_state.main(["--repo-root", str(root)]), 0)
+            self.assertTrue((root / ".keel/setup-state.json").is_file())
+
+    def test_outside_and_symlink_paths_refuse_before_read_or_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            root = base / "repo"
+            root.mkdir()
+            outside = base / "external"
+            outside.write_text("unchanged")
+            (root / "link").symlink_to(base, target_is_directory=True)
+            for path in (outside, pathlib.Path("../external"), pathlib.Path("link/external")):
+                with self.subTest(path=path):
+                    report = setup_state.begin(path, root)
+                    self.assertEqual(report["continuity"], "lost")
+                    self.assertFalse(report["state_persisted"])
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(setup_state.main(["--state", str(path), "--repo-root", str(root)]), 1)
+            self.assertEqual(outside.read_text(), "unchanged")
+            self.assertEqual(sorted(item.name for item in base.iterdir()), ["external", "repo"])
+
     def test_main_persists_each_successful_invocation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -657,7 +700,7 @@ class CommandLineTest(unittest.TestCase):
             path = pathlib.Path(directory) / "setup-state.json"
             path.write_text(json.dumps(_valid(active_mapping_hash="abc")))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                code = setup_state.main(["--validate-only", "--state", str(path)])
+                code = setup_state.main(["--validate-only", "--state", str(path), "--repo-root", directory])
         self.assertEqual(code, 1)
 
     def test_validate_only_accepts_the_shipped_shape(self):

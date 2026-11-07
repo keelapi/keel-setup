@@ -35,7 +35,7 @@ DEFAULT_STATE_PATH = pathlib.PurePosixPath(".keel/setup-state.json")
 
 SCHEMA_VERSION = "1.0"
 MAX_STRING_LENGTH = 512
-MAX_STATE_BYTES = 32_768
+MAX_STATE_BYTES = 1_000_000
 MAX_STATE_DEPTH = 32
 REQUIRED_PRE_GATE_CHECKS = (
     "syntax_or_compile",
@@ -644,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
         "--state",
         type=pathlib.Path,
         default=pathlib.Path(str(DEFAULT_STATE_PATH)),
-        help="path to the local, git-ignored continuity file",
+        help="path inside repo-root to the git-ignored continuity file; relative paths use repo-root",
     )
     parser.add_argument("--repo-root", type=pathlib.Path, default=pathlib.Path.cwd())
     parser.add_argument(

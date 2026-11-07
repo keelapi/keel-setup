@@ -4,6 +4,7 @@ import importlib.util
 import contextlib
 import io
 import json
+import os
 import pathlib
 import tempfile
 import unittest
@@ -35,6 +36,17 @@ def report():
 
 
 class FeedbackValidatorTest(unittest.TestCase):
+    def test_deep_structure_refuses_before_semantic_walk(self):
+        value = {}
+        for _ in range(100):
+            value = {"child": value}
+        self.assertTrue(validator.validate(value, set(), None))
+
+    def test_fifo_input_is_refused_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "fifo"
+            os.mkfifo(path)
+            self.assertEqual(validator.main([str(path)]), 1)
     def test_array_strings_receive_all_detectors_and_portable_path_checks(self):
         for sample in ("Bearer example-sensitive", "token=opaque-value", "API_TOKEN=opaque-value",
                        "```source```", "/outside/file.py", "C:/project/file.py", "C:relative.py",

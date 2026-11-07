@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import pathlib
+import os
+import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).parents[1] / "scripts" / "validate_enforceability_report.py"
@@ -20,6 +22,8 @@ POLICY_SCHEMA = json.loads((ROOT / "keel-policy" / "reference" / "policy-documen
 def report(field="action.name", status="untrusted", replacement=validator.BOUND_TOOL_NAME):
     return {
         "schema_version": "1.0",
+        "validation_scope": "schema_and_field_provenance_only",
+        "unverified_claims": ["safe_outcome", "readback", "rule_order", "activation_effect", "runtime_enforcement"],
         "intent": ["Require review for this exact MCP tool."],
         "policy": None,
         "readback": ["The rule requires human review."],
@@ -47,9 +51,50 @@ def add_policy(candidate, field, action="allow"):
 
 
 class EnforceabilityValidatorTest(unittest.TestCase):
+    def test_deep_and_wide_reports_refuse_before_recursive_validation(self):
+        candidate = report()
+        value = {}
+        for _ in range(100):
+            value = {"not": value}
+        candidate["policy"] = value
+        self.assertTrue(any("nesting limit" in item for item in validate(candidate)))
+        candidate["policy"] = {"rules": [{}] * 1001}
+        self.assertTrue(any("item limit" in item for item in validate(candidate)))
+
+    def test_cli_refuses_oversize_fifo_and_parser_recursion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "input"
+            for content in (b"x" * (validator.MAX_REPORT_BYTES + 1), b"[" * 2000 + b"]" * 2000):
+                path.write_bytes(content)
+                self.assertEqual(validator.main([str(path)]), 1)
+            path.unlink()
+            os.mkfifo(path)
+            self.assertEqual(validator.main([str(path)]), 1)
+
+    def test_report_cannot_claim_semantic_certification_or_activation_delta(self):
+        candidate = report()
+        candidate["activation_effect"] = "narrows"
+        self.assertTrue(validate(candidate))
+
+    def test_trust_requires_availability_on_a_closed_execution_surface(self):
+        for surface in ("realtime", "voice", "arbitrary_route"):
+            candidate = report(field=validator.BOUND_TOOL_NAME, status="trusted", replacement=None)
+            candidate["enforceability"][0]["surface"] = surface
+            self.assertTrue(validate(candidate), surface)
+        candidate = report(field=validator.BOUND_TOOL_NAME, status="trusted", replacement=None)
+        self.assertEqual(validate(candidate), [])
+        candidate["enforceability"][0].update(surface="voice", status="unavailable", safe_outcome="blocked")
+        self.assertEqual(validate(candidate), [])
+        candidate = report()
+        candidate["unverified_claims"] = []
+        self.assertTrue(validate(candidate))
+        candidate = report()
+        candidate["validation_scope"] = "certified_enforceable"
+        self.assertTrue(validate(candidate))
     def test_rule_effects_readback_and_references_are_structurally_bound(self):
         candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider", "allow")
-        candidate["enforceability"][0]["safe_outcome"] = "auto_allow"
+        # Trusted provider is available only on managed_execute (surface matrix).
+        candidate["enforceability"][0].update(safe_outcome="auto_allow", surface="managed_execute")
         candidate["readback"] = validator.derive_readback(candidate["policy"])
         self.assertEqual(validate(candidate), [])
         for key, value in (("readback", ["Requires review only"]), ("activation_effect", "narrows")):

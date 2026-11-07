@@ -373,6 +373,8 @@ def classify_repository(repo: pathlib.Path) -> dict[str, Any]:
     revision = _git(repo, "rev-parse", "HEAD")
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise PipelineFailure("model_review_required", "repository has no immutable Git revision")
+    if (repo / ".keel").is_symlink() or (repo / ".keel" / "setup-state.json").is_symlink():
+        raise PipelineFailure("model_review_required", "local setup paths must not be symlinks")
 
     instruction_names = {"AGENTS.md", "CLAUDE.md", ".cursorrules", "copilot-instructions.md"}
     instructions: list[str] = []
@@ -974,8 +976,10 @@ def validate_patch(
         "freshness_at_request_time": True,
         "credential_value_absent": True,
         "changed_paths": sorted(allowed_paths),
-        "focused_compatibility_test": focused_test,
+        "focused_compatibility_test": None,
         "focused_compatibility_test_status": "deferred_requires_isolation" if focused_test else "not_applicable",
+        "prepared_compatibility_test": focused_test,
+        "runtime_compatibility": "not_executed_before_human_gate",
     }
 
 
@@ -1050,7 +1054,7 @@ def _ensure_state_ignored(repo: pathlib.Path) -> bool:
     return True
 
 
-def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | None]) -> None:
+def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | None], *, remove_state: bool = False) -> None:
     for relative, content in originals.items():
         path = repo.joinpath(*relative.parts)
         if content is None:
@@ -1061,16 +1065,28 @@ def _restore(repo: pathlib.Path, originals: dict[pathlib.PurePosixPath, bytes | 
                     pass
         else:
             _write(path, content.decode("utf-8"), repo)
-    state = repo / ".keel" / "setup-state.json"
+    if not remove_state:
+        return
+    # Remove only state this run created: no-follow descriptors, regular file only.
+    parent = os.open(repo, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        with _mutation_parent(state, repo) as (parent, name):
-            os.unlink(name, dir_fd=parent)
-    except FileNotFoundError:
-        pass
-    try:
-        state.parent.rmdir()
-    except OSError:
-        pass
+        try:
+            local = os.open(".keel", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        except OSError:
+            return
+        try:
+            if stat.S_ISREG(os.stat("setup-state.json", dir_fd=local, follow_symlinks=False).st_mode):
+                os.unlink("setup-state.json", dir_fd=local)
+        except OSError:
+            pass
+        finally:
+            os.close(local)
+        try:
+            os.rmdir(".keel", dir_fd=parent)
+        except OSError:
+            pass
+    finally:
+        os.close(parent)
 
 
 def _line_change_stats(before: str, after: str) -> tuple[int, int, int]:
@@ -1164,6 +1180,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
     timings: dict[str, float] = {}
     originals: dict[pathlib.PurePosixPath, bytes | None] = {}
     edited = False
+    state_created = False
     try:
         bundle = bundle.resolve()
         mark = time.perf_counter()
@@ -1222,6 +1239,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         initialized = setup_state.begin(state_path, repo)
         if not initialized.get("state_persisted"):
             raise PipelineFailure("validation_failed", "setup state initialization failed")
+        state_created = True
         failures = setup_state.mark_waiting_for_human(
             state_path,
             repo,
@@ -1250,7 +1268,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         }
     except PipelineFailure as exc:
         if edited:
-            _restore(repo, originals)
+            _restore(repo, originals, remove_state=state_created)
         timings["total_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return {
             "schema_version": "1.0",
@@ -1263,7 +1281,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
         }
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         if edited:
-            _restore(repo, originals)
+            _restore(repo, originals, remove_state=state_created)
         timings["total_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return {
             "schema_version": "1.0",

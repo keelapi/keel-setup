@@ -41,6 +41,8 @@ def _git(root: pathlib.Path, *args: str) -> str:
 
 
 class DeterministicFastFirstRunTest(unittest.TestCase):
+    @unittest.skipUnless((ROOT / "scripts/check_release_bundle.py").is_file(),
+                         "the release checker is a publication-layer file of the public bundle")
     def test_fallback_release_checker_rejects_bytecode_and_cache_entries(self):
         checker = _load("fallback_bundle_check", ROOT / "scripts/check_release_bundle.py")
         for relative in ("shared/scripts/__pycache__/schema_validation.pyc", "shared/scripts/schema_validation.pyc",
@@ -69,6 +71,7 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
             "keel-policy/scripts/consume_authoring_context.py",
             "keel-policy/scripts/validate_enforceability_report.py",
             "shared/scripts/schema_validation.py",
+            "shared/scripts/bounded_input.py",
             "shared/scripts/validate_feedback_report.py",
         ):
             target = cls.bundle / relative
@@ -200,6 +203,56 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                 self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), before)
                 self.assertIn("total_ms", result["timings"])
 
+    def test_dangling_external_state_link_is_untouched_by_preparation_and_rollback(self):
+        root = self._repo()
+        with tempfile.TemporaryDirectory() as directory:
+            external = pathlib.Path(directory)
+            state = external / "setup-state.json"
+            state.symlink_to(external / "does-not-exist")
+            (root / ".keel").symlink_to(external, target_is_directory=True)
+            _git(root, "add", ".keel")
+            _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "state link")
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertTrue(state.is_symlink())
+            fast._restore(root, {}, remove_state=True)
+            self.assertTrue(state.is_symlink())
+            self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+
+    def test_tracked_gitignore_symlink_refuses_without_touching_external_file(self):
+        root = self._repo()
+        with tempfile.TemporaryDirectory() as directory:
+            external = pathlib.Path(directory) / "external"
+            external.write_text("external content\n")
+            (root / ".gitignore").unlink()
+            (root / ".gitignore").symlink_to(external)
+            _git(root, "add", ".gitignore")
+            _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "link")
+            before = external.stat()
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "validation_failed", result)
+            self.assertEqual(external.read_text(), "external content\n")
+            self.assertEqual(external.stat().st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual((root / "app.py").read_text(), fixtures.GOLDEN_APP)
+            # Rollback refuses to replace the link and never writes through it.
+            with self.assertRaises(fast.PipelineFailure):
+                fast._restore(root, {pathlib.PurePosixPath(".gitignore"): b"restored\n"})
+            self.assertEqual(external.read_text(), "external content\n")
+            self.assertTrue((root / ".gitignore").is_symlink())
+
+    def test_extra_statements_in_replaced_span_force_refusal_without_edits(self):
+        variants = [
+            fixtures.GOLDEN_APP.replace("    response = client.responses.create(", "    authorize_user()\n    response = client.responses.create("),
+            fixtures.GOLDEN_APP.replace("    summary = response.output_text.strip()", "    audit_response(response)\n    summary = response.output_text.strip()"),
+            fixtures.GOLDEN_APP.replace("        client = OpenAI()", "        cleanup()\n        client = OpenAI()"),
+            fixtures.GOLDEN_APP.replace("    if client is None:", "    if client is None or needs_refresh():"),
+        ]
+        for source in variants:
+            root = self._repo(source)
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertEqual((root / "app.py").read_text(), source)
+            self.assertEqual(_git(root, "status", "--porcelain=v1"), "")
     def test_pre_gate_validation_does_not_execute_target_initialization(self):
         for entrypoint in ("tests/__init__.py", "app.py", "sitecustomize.py"):
             with self.subTest(entrypoint=entrypoint):
@@ -404,9 +457,22 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertIn("FakeClient", test_source)
         self.assertIn("https://api.keelapi.com/v1/execute", test_source)
         self.assertEqual(
-            result["validation"]["focused_compatibility_test"],
+            result["validation"]["prepared_compatibility_test"],
             "tests.test_app.SummarizerTests.test_sends_text_to_the_selected_model",
         )
+
+    def test_automatic_preparation_never_runs_customer_initializers_or_callable(self):
+        source = fixtures.GOLDEN_APP.replace("import os", "import os\nfrom pathlib import Path\nPath('module-sentinel').touch()")
+        source = source.replace("    source = text.strip()", "    Path('call-sentinel').touch()\n    source = text.strip()")
+        root = self._repo(source)
+        (root / "tests/__init__.py").write_text("from pathlib import Path\nPath('package-sentinel').touch()\n")
+        _git(root, "add", ".")
+        _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid", "commit", "-qm", "sentinels")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertIsNone(result["validation"]["focused_compatibility_test"])
+        for name in ("module-sentinel", "package-sentinel", "call-sentinel"):
+            self.assertFalse((root / name).exists(), name)
 
     def test_regression_generated_adapter_accepts_normalized_execute_text(self):
         root = self._repo()
@@ -653,6 +719,16 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertEqual(result["outcome"], "ready_for_human", result)
         self.assertNotIn(sentinel, json.dumps(result))
         self.assertIn(sentinel, (root / "app.py").read_text())
+
+    def test_source_credentials_never_appear_in_structured_output(self):
+        samples = ["Authorization: Bearer synthetic-bearer-value", "github_pat_synthetic_example_123456789",
+                   "-----BEGIN PRIVATE KEY-----synthetic-----END PRIVATE KEY-----",
+                   "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJleGFtcGxlIn0.synthetic_signature"]
+        for value in samples:
+            root = self._repo(fixtures.GOLDEN_APP.replace("    response =", f"    # {value}\n    response ="))
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "ready_for_human", result)
+            self.assertNotIn(value, json.dumps(result))
 
     def test_custom_base_url_is_safe_fallback(self):
         root = self._repo(fixtures.CUSTOM_BASE_URL_APP)

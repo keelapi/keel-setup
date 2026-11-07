@@ -1,12 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://keelapi.com/schemas/enforceability-report.v1.json",
-  "title": "Keel policy enforceability report",
+  "title": "Keel policy schema and field-provenance report",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "intent", "policy", "readback", "enforceability", "activation_effect", "blocked_requests", "human_next_step"],
+  "required": ["schema_version", "validation_scope", "unverified_claims", "intent", "policy", "readback", "enforceability", "activation_effect", "blocked_requests", "human_next_step"],
   "properties": {
     "schema_version": {"const": "1.0"},
+    "validation_scope": {"const": "schema_and_field_provenance_only"},
+    "unverified_claims": {"const": ["safe_outcome", "readback", "rule_order", "activation_effect", "runtime_enforcement"]},
     "intent": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 1000}, "maxItems": 100},
     "policy": {"type": ["object", "null"]},
     "readback": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1, "maxLength": 2000}, "maxItems": 200},
@@ -21,7 +23,7 @@
           "rule_reference": {"type": "string", "minLength": 1, "maxLength": 256},
           "required_fact": {"type": "string", "minLength": 1, "maxLength": 512},
           "field": {"type": ["string", "null"], "maxLength": 512},
-          "surface": {"type": "string", "minLength": 1, "maxLength": 128},
+          "surface": {"enum": ["managed_execute", "managed_mcp", "realtime", "voice"]},
           "provenance": {"enum": ["keel_derived", "connector_asserted", "caller_asserted", "human_asserted", "unavailable", "unresolved"]},
           "status": {"enum": ["trusted", "untrusted", "unavailable", "unresolved"]},
           "safe_outcome": {"enum": ["auto_allow", "review", "deny", "proposal_only", "blocked"]},
@@ -30,7 +32,7 @@
         }
       }
     },
-    "activation_effect": {"enum": ["narrows", "widens", "ambiguous", "unchanged", "unresolved"]},
+    "activation_effect": {"const": "unresolved"},
     "blocked_requests": {
       "type": "array",
       "maxItems": 200,
