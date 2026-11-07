@@ -42,7 +42,9 @@ def _walk(value: Any, path: str = ""):
             yield from _walk(child, child_path)
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            yield from _walk(child, f"{path}[{index}]")
+            child_path = f"{path}[{index}]"
+            yield child_path, "", child
+            yield from _walk(child, child_path)
 
 
 def validate(report: Any, approved_context: set[str], channel: str | None) -> list[str]:
@@ -84,7 +86,10 @@ def validate(report: Any, approved_context: set[str], channel: str | None) -> li
         for index, location in enumerate(locations):
             if not isinstance(location, str):
                 failures.append(f"optional_context.source_locations[{index}] must be a string")
-            elif pathlib.PurePath(location).is_absolute() or ".." in pathlib.PurePosixPath(location).parts:
+            elif (not location or "\\" in location or pathlib.PureWindowsPath(location).drive
+                  or pathlib.PurePosixPath(location).is_absolute()
+                  or ".." in pathlib.PurePosixPath(location).parts
+                  or any(ord(char) < 32 for char in location)):
                 failures.append(f"optional_context.source_locations[{index}] must be repository-relative")
     else:
         failures.append("optional_context.source_locations must be an array")

@@ -35,6 +35,17 @@ def report():
 
 
 class FeedbackValidatorTest(unittest.TestCase):
+    def test_array_strings_receive_all_detectors_and_portable_path_checks(self):
+        for sample in ("Bearer example-sensitive", "token=opaque-value", "API_TOKEN=opaque-value",
+                       "```source```", "/outside/file.py", "C:/project/file.py", "C:relative.py",
+                       r"\\server\share\file.py", r"src\..\private.py", "../file.py"):
+            candidate = report()
+            candidate["optional_context"]["source_locations"] = [sample]
+            self.assertTrue(validator.validate(candidate, {"source_locations"}, None), sample)
+        candidate = report()
+        candidate["optional_context"]["source_locations"] = ["src/tool.py:9"]
+        self.assertEqual(validator.validate(candidate, {"source_locations"}, None), [])
+
     def test_safe_default_report_passes_without_context_approval(self):
         self.assertEqual(validator.validate(report(), set(), None), [])
 
