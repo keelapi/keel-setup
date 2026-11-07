@@ -502,6 +502,28 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         self.assertIn(retained, after)
         compile(after, "app.py", "exec")
 
+    def test_unrecognized_security_logic_and_extra_tests_are_preserved_by_refusal(self):
+        for source in (
+            fixtures.GOLDEN_APP.replace("    summary = response.output_text.strip()", "    audit_request()\n    summary = response.output_text.strip()"),
+            fixtures.GOLDEN_APP.replace("        client = OpenAI()", "        authorize_user()\n        client = OpenAI()"),
+            fixtures.GOLDEN_APP.replace("    response = client.responses.create(", "    authorize_user()\n    response = client.responses.create("),
+        ):
+            root = self._repo(source)
+            result = self._run(root)
+            self.assertEqual(result["outcome"], "model_review_required", result)
+            self.assertEqual((root / "app.py").read_text(), source)
+            self.assertEqual(_git(root, "status", "--porcelain"), "")
+        root = self._repo()
+        path = root / "tests/test_app.py"
+        source = path.read_text() + "\ndef test_extra_authorization():\n    assert authorized()\n"
+        path.write_text(source)
+        _git(root, "add", ".")
+        _git(root, "commit", "-qm", "extra test")
+        result = self._run(root)
+        self.assertEqual(result["outcome"], "model_review_required", result)
+        self.assertEqual(path.read_text(), source)
+        self.assertEqual(_git(root, "status", "--porcelain"), "")
+
     def test_retained_try_except_block_is_copied_verbatim_and_compiles(self):
         root = self._repo(fixtures.RETAINED_TRY_EXCEPT_APP)
         retained = '''    try:

@@ -541,7 +541,7 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
     if _attribute_name(call.func) != "client.responses.create":
         raise PipelineFailure("model_review_required", "Responses call receiver is an unrecognized wrapper")
     keywords = {keyword.arg: keyword.value for keyword in call.keywords if keyword.arg is not None}
-    if set(keywords) != {"model", "instructions", "input"} or call.args:
+    if set(keywords) != {"model", "instructions", "input"} or call.args or len(call.keywords) != 3:
         raise PipelineFailure("model_review_required", "Responses request arguments do not match the golden shape")
     try:
         instructions = ast.literal_eval(keywords["instructions"])
@@ -574,6 +574,12 @@ def discover_golden_seam(repo: pathlib.Path, inventory: Any) -> GoldenSeam:
         raise PipelineFailure("model_review_required", "provider construction and response mapping do not match the golden shape")
     if response_name != "response" or summary_name != "summary":
         raise PipelineFailure("model_review_required", "response variable shape is not recognized")
+    expected_constructor = ast.parse("if client is None:\n    from openai import OpenAI\n    client = OpenAI()\n").body[0]
+    expected_mapping = ast.parse("summary = response.output_text.strip()\n").body[0]
+    if (response_index != client_if_index + 1 or summary_index != response_index + 1
+            or ast.dump(function.body[client_if_index]) != ast.dump(expected_constructor)
+            or ast.dump(function.body[summary_index]) != ast.dump(expected_mapping)):
+        raise PipelineFailure("model_review_required", "provider replacement contains additional or unrecognized logic")
     constructor_calls = [node for node in ast.walk(function.body[client_if_index]) if isinstance(node, ast.Call) and _attribute_name(node.func) == "OpenAI"]
     if len(constructor_calls) != 1 or constructor_calls[0].args or constructor_calls[0].keywords:
         raise PipelineFailure("unsupported_shape", "OpenAI client is not using the default official endpoint")
@@ -748,6 +754,10 @@ def _generate_coupled_test(repo: pathlib.Path, seam: GoldenSeam) -> str:
     assert seam.coupled_test is not None
     path = repo.joinpath(*seam.coupled_test.parts)
     original = path.read_text(encoding="utf-8")
+    # This whole-file migration is authorized only for the exact published
+    # fixture. Any additional test, fixture, hook, or comment requires review.
+    if hashlib.sha256(original.encode("utf-8")).hexdigest() != "bdb7e770dfe505e3efab6e6852afb70b88b38b2b6222cb451aacf25bef29592b":
+        raise PipelineFailure("model_review_required", "coupled tests differ from the exact supported fixture")
     required = (
         "class FakeResponses", "class FakeClient", "class SummarizerTests",
         "test_sends_text_to_the_selected_model", "test_rejects_empty_text_before_calling_the_provider",
