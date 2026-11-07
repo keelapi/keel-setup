@@ -18,6 +18,8 @@ import sys
 import time
 from typing import Any
 
+sys.dont_write_bytecode = True
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "shared" / "scripts"))
 from schema_validation import validate as validate_schema  # noqa: E402

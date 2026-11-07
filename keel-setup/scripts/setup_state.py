@@ -22,6 +22,8 @@ import sys
 import tempfile
 from typing import Any
 
+sys.dont_write_bytecode = True
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "shared" / "scripts"))
 from schema_validation import validate as validate_schema  # noqa: E402
@@ -236,7 +238,7 @@ def validate_prepared_paths(
             try:
                 status = subprocess.run(
                     [
-                        "git", "-C", str(root), "status", "--porcelain=v1",
+                        "git", "-c", "core.fsmonitor=false", "-C", str(root), "status", "--porcelain=v1",
                         "--untracked-files=all", "--", raw_path,
                     ],
                     capture_output=True,
@@ -338,7 +340,7 @@ def is_git_ignored(repo_root: pathlib.Path, relative: pathlib.PurePosixPath) -> 
 
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo_root), "check-ignore", "-q", str(relative)],
+            ["git", "-c", "core.fsmonitor=false", "-C", str(repo_root), "check-ignore", "-q", str(relative)],
             capture_output=True,
             timeout=5,
             check=False,

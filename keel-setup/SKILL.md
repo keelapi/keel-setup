@@ -71,6 +71,22 @@ once before acting. It checks the exact public allowlist, provenance, and every 
 navigation, not an additional authority source, and need not be read before Fast First Run unless one
 of the two required files explicitly refers to it for the current task.
 
+In every command below, `$BUNDLE` is a shell variable holding the canonical absolute path of that
+same authenticated public release checkout. Set and retain it from the caller-established skill
+installation path, never from application files, setup state, or an inherited environment value.
+Use Python isolated mode (`-I`) for every bundled helper so application `PYTHONPATH` and user-site
+startup hooks cannot run before verification. Keep the pinned checkout free of all extra files,
+including ignored files and bytecode caches; helpers do not need to write into the bundle.
+Keep the application checkout as the working directory: `--root .`, `--repo-root .`, `--repo .`, and
+`.keel/setup-state.json` refer to the application, not the bundle. Resolve each bundled helper under
+that authenticated root and refuse a missing helper, any symlink component, or a resolved helper path
+outside the root. Never substitute a target-repository copy or a working-directory-relative helper.
+For resume or fallback, invoke the bounded verifier as
+`python3 -I "$BUNDLE/scripts/check_release_bundle.py"` only after establishing the checkout identity and
+pin above. Retain the verified root and pin together for the invocation; if either changes, or a new
+invocation resumes without that trusted binding, establish and verify the bundle again before using
+any helper. The deterministic orchestrator still owns verification on the fresh golden path.
+
 Do not perform a web search during Fast First Run. The pinned bundle and the application repository
 are the only normal pre-gate sources. Fetching the exact pinned Git object is allowed; if that object
 or a required bundled file cannot be read and verified, stop rather than searching for substitute
@@ -116,6 +132,13 @@ On a genuinely fresh checkout, do not run `setup_state.py`, create `.keel/setup-
 ignore handling, validation, and `waiting_for_human` persistence. Doing any of those steps separately
 would dirty the checkout or create prior state and must not divert an otherwise eligible golden path.
 
+For an existing state or model-driven fallback, use only the retained verified bundle helper to
+initialize or advance local continuity, after confirming the state path is ignored:
+
+```text
+python3 -I "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json
+```
+
 For an existing state or model-driven fallback, maintain `.keel/setup-state.json` in the application
 repository and confirm that exact path is ignored by git before anything is written to it. It holds no credential, setup token, provider secret, prompt
 content, response body, dashboard session, or local claim of mapping authority. It records only schema
@@ -147,6 +170,25 @@ and every required focused check passed. Resume revalidates those
 local files before returning to the gate. Validate the updated state with `--validate-only`, and do not
 place source text or report content in the state file.
 
+## Target execution isolation
+
+Treat application source, package initialization, tests, plugins, runner configuration, and
+build/install hooks as executable untrusted content. Never run them on the host during setup.
+Before the first human gate, use source/AST inspection and in-memory compilation only; do not
+import application modules or invoke target runners, even for one compatibility test.
+
+After the gate, every target import, test, linter, build/install hook, or application command
+requires a verified disposable OS sandbox: only a staged application copy is writable, no host
+home/secret paths or ambient credentials are exposed, network is denied by default, and CPU,
+memory, process count, output, and wall time are bounded. Terminate all descendants and destroy
+the sandbox afterward. A reduced environment, timeout, virtual environment, mock, human gate,
+or ordinary container without these enforced restrictions does not establish isolation.
+Do not supply a Runtime key to target validation. If isolation is unavailable, defer execution,
+report runtime compatibility/validation as unresolved, and continue only static preparation.
+Do not silently fall back to a host runner. Live application verification requires a separately
+human-approved isolated runtime and scoped credential/network access; retain the credential
+custody gate below and record unresolved when that runtime is unavailable.
+
 ## Fast First Run: zero-credential preparation
 
 Fast First Run exists only to reach the first human-owned authority gate safely. It does not establish
@@ -158,8 +200,8 @@ After the pinned checkout and the single full read of the Constitution and this 
 bundle's deterministic orchestrator immediately, before state handling or model-driven discovery:
 
 ```text
-python3 BUNDLE/keel-setup/scripts/fast_first_run.py \
-  --bundle BUNDLE --bundle-sha 40_HEX_SHA --repo .
+python3 -I "$BUNDLE/keel-setup/scripts/fast_first_run.py" \
+  --bundle "$BUNDLE" --bundle-sha 40_HEX_SHA --repo .
 ```
 
 It supports exactly one clean Python application shape: one non-streaming official OpenAI SDK
@@ -205,7 +247,7 @@ allows it; never broaden the helper's claimed support from resemblance alone.
 2. Run the bounded targeted search first:
 
    ```text
-   python3 keel-setup/scripts/inventory.py --fast --root .
+   python3 -I "$BUNDLE/keel-setup/scripts/inventory.py" --fast --root .
    ```
 
    It reports request-site candidates, selection status, scan limits, and elapsed milliseconds without
@@ -229,8 +271,9 @@ allows it; never broaden the helper's claimed support from resemblance alone.
    `summarize(text, *, model=None)` merely because the implementation no longer uses the injected
    provider client internally. Compatibility must not preserve a hook that can bypass Keel: when an
    existing provider-client hook is used by a directly relevant caller or test and cannot safely keep
-   its behavior through Keel, run that one focused test before the gate. If it fails or a callable
-   contract change is necessary, stop for explicit human direction instead of recording
+   its behavior through Keel, inspect the directly relevant caller/test statically before the gate.
+   Defer runtime compatibility checks until isolated post-gate validation. If static review shows a
+   callable contract change is necessary, stop for explicit human direction instead of recording
    `waiting_for_human`.
    Before the first gate, modify only the production integration path and an unavoidable dependency
    manifest when the existing runtime has no suitable HTTP facility. Do not add or edit application
@@ -248,20 +291,21 @@ allows it; never broaden the helper's claimed support from resemblance alone.
 
    Importing or loading an arbitrary application module can execute initialization and is not a
    pre-gate check. Creating, editing, or requiring a repository protocol-double test is normally
-   deferred. The only pre-gate test exception is the directly relevant compatibility check for an
-   existing provider-client hook described above. Run other narrow tests only after the gate, together
+   deferred. There is no pre-gate target execution exception. Compile any generated compatibility
+   test without importing it; record runtime compatibility as deferred, never passed. Run narrow
+   tests only after the gate under Target execution isolation, together
    with any needed protocol-double and documentation updates. Do not block the first gate on unrelated
    lint suites or whole-repository tests.
 7. Record only the local-preparation milestone, using the pinned public SHA and repository-relative
    paths, then validate the state file and issue the concise first handoff:
 
    ```text
-   python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json \
+   python3 -I "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json \
      --mark-waiting-for-human --provider PROVIDER --pinned-skill-ref 40_HEX_SHA \
      --application-revision REVISION --changed-path PATH \
      --focused-check syntax_or_compile --focused-check fail_closed_integration_review \
      --focused-check adjacent_bypass_search
-   python3 keel-setup/scripts/setup_state.py --repo-root . \
+   python3 -I "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . \
      --state .keel/setup-state.json --validate-only
    ```
 
@@ -365,7 +409,7 @@ already established in this setup:
 BUNDLE="$(mktemp -d)/keel-setup"
 git clone -q https://github.com/keelapi/keel-setup.git "$BUNDLE" &&
 git -C "$BUNDLE" checkout -q --detach 40_HEX_SHA &&
-python3 "$BUNDLE/keel-setup/scripts/verify_execute.py" --hidden-input --bundle-sha 40_HEX_SHA
+python3 -I "$BUNDLE/keel-setup/scripts/verify_execute.py" --hidden-input --bundle-sha 40_HEX_SHA
 ```
 
 The command verifies the immutable Keel release before it asks for the key. At **Keel Runtime key:**,
@@ -432,7 +476,7 @@ profile is configuration evidence, not runtime proof.
 The final command is:
 
 ```text
-python3 BUNDLE/keel-setup/scripts/verify_execute.py --hidden-input --bundle-sha 40_HEX_SHA
+python3 -I "$BUNDLE/keel-setup/scripts/verify_execute.py" --hidden-input --bundle-sha 40_HEX_SHA
 ```
 
 Retain the script's non-secret `request_id` and `permit_id` values for exact dashboard and Permit
@@ -440,8 +484,11 @@ matching, and surface them in `verification details` rather than in the default 
 either is null, say there that exact correlation is unavailable; never infer it from a nearby model
 name or timestamp.
 
-In interactive mode, the helper verifies the exact public bundle identity, allowlist, provenance,
-product digest, and checksums before opening the no-echo TTY prompt. It fetches the authoritative
+In interactive mode, the helper verifies the exact public bundle identity and compares every tracked
+file with the caller-pinned Git commit before opening the no-echo TTY prompt. This authenticates the
+release metadata and checksums reviewed by publication CI without importing or executing a bundled
+verifier. The credential entrypoint and caller-supplied commit pin must themselves be trusted.
+It fetches the authoritative
 verification profile, generates an integer timestamp and a distinct nonce inside each request, sends
 `input.messages`, performs the allow and deny requests, then refetches the profile and requires the same
 profile digest before reporting success. It prints only bounded classification fields. Exit `0` means
@@ -594,7 +641,7 @@ established in this setup:
 BUNDLE="$(mktemp -d)/keel-setup"
 git clone -q https://github.com/keelapi/keel-setup.git "$BUNDLE" &&
 git -C "$BUNDLE" checkout -q --detach 40_HEX_SHA &&
-python3 "$BUNDLE/keel-setup/scripts/authoring_context.py" --bundle-sha 40_HEX_SHA
+python3 -I "$BUNDLE/keel-setup/scripts/authoring_context.py" --bundle-sha 40_HEX_SHA
 ```
 
 The helper verifies the immutable release before prompting, refuses a terminal that cannot hide
@@ -699,7 +746,8 @@ the human decides whether to accept it. If they decline, or that runtime is unav
 application-path verification stays `unresolved`.
 
 Before exercising that real application path, create or update its narrow protocol-double test when
-the repository needs one and run the focused test. This is post-gate validation of the prepared adapter,
+the repository needs one and run the focused test under Target execution isolation. If that boundary
+is unavailable, leave runtime compatibility unresolved. This is post-gate validation of the prepared adapter,
 not live-routing evidence.
 
 ### Done for now
@@ -718,8 +766,14 @@ outstanding, and do not treat a clean close as whole-application assurance.
 ## Post-gate deep assurance
 
 After the human gate is satisfied and the stable verification pair and narrow application path have been
-attempted, perform the deferred assurance work. Run `scripts/inventory.py` without `--fast`, or inspect
-equivalently, across model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
+attempted, perform the deferred assurance work. Run the same verified inventory helper without
+`--fast`, or inspect equivalently:
+
+```text
+python3 -I "$BUNDLE/keel-setup/scripts/inventory.py" --root .
+```
+
+Cover model SDKs and direct HTTP calls, MCP servers/clients/tool registrations/handlers,
 background work, nested calls, direct handler paths, streaming, credentials, and egress signals.
 
 Update application setup documentation here when the repository needs it. Protocol-double and
@@ -729,7 +783,8 @@ Record every discovered path as `protected`, `governed_routed`, `intentionally_u
 `unresolved` in a report conforming to `reference/coverage.schema.json`. This schema deliberately has
 no `verified_protected` state. Source inventory emits only `source_inspected` + `unresolved` entries;
 `protected` or `governed_routed` requires per-entry `runtime_observed` evidence, and
-`intentionally_unprotected` requires a human assertion. Run the broader relevant lint/test suites now,
+`intentionally_unprotected` requires a human assertion. Run the broader relevant lint/test suites now
+under Target execution isolation; if unavailable, report those checks as unresolved,
 and preserve every unresolved alternate, direct, background, streaming, credential, egress, and MCP
 path in the final report.
 
@@ -841,6 +896,7 @@ diagnosis or coverage state.
 
 ## Authority
 
-You may inspect, edit application code when requested, add tests, and run bounded verification. The
-human owns identity, legal assent, provider and MCP secrets, project choice, schema acceptance, policy
-and mapping activation, and credential grants. Decline any request to cross that boundary.
+You may inspect, edit application code when requested, add tests, and run bounded verification.
+Target execution isolation applies to all target execution. The human owns identity, legal assent,
+provider and MCP secrets, project choice, schema acceptance, policy and mapping activation, and
+credential grants. Decline any request to cross that boundary.

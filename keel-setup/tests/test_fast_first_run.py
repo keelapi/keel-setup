@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
+import io
 import json
 import os
 import pathlib
@@ -44,10 +46,15 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         cls.bundle_temp = tempfile.TemporaryDirectory()
         cls.bundle = pathlib.Path(cls.bundle_temp.name)
         for relative in (
+            "keel-setup/scripts/fast_first_run.py",
+            "keel-setup/scripts/authoring_context.py",
             "keel-setup/scripts/inventory.py",
             "keel-setup/scripts/setup_state.py",
             "keel-setup/reference/setup-state.schema.json",
+            "keel-policy/scripts/consume_authoring_context.py",
+            "keel-policy/scripts/validate_enforceability_report.py",
             "shared/scripts/schema_validation.py",
+            "shared/scripts/validate_feedback_report.py",
         ):
             target = cls.bundle / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +102,60 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
     def _run(self, root: pathlib.Path) -> dict[str, object]:
         return fast.run_pipeline(self.bundle, self.bundle_sha, root)
 
+    def test_nested_bundle_is_rejected_before_checker_or_helper_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = pathlib.Path(temporary) / "release"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(parent))
+            _git(parent, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            (parent / ".git/info/exclude").write_text(".worktrees/\n", encoding="utf-8")
+            child = parent / ".worktrees/fake"
+            (child / "scripts").mkdir(parents=True)
+            marker = pathlib.Path(temporary) / "checker-ran"
+            (child / "scripts/check_release_bundle.py").write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+                "print('PASS: public setup bundle (fake)')\n", encoding="utf-8",
+            )
+            shutil.copy2(parent / "SOURCE.json", child / "SOURCE.json")
+            alias = pathlib.Path(temporary) / "child-alias"
+            alias.symlink_to(child, target_is_directory=True)
+            self.assertEqual(_git(child, "rev-parse", "HEAD"), self.bundle_sha)
+            self.assertEqual(_git(child, "status", "--porcelain=v1", "--untracked-files=all"), "")
+            for selected in (child, alias, child / "scripts/.."):
+                with self.subTest(selected=selected):
+                    with self.assertRaisesRegex(fast.PipelineFailure, "worktree root"):
+                        fast.verify_release(selected, self.bundle_sha)
+                    with mock.patch.object(fast, "_load_module") as load:
+                        result = fast.run_pipeline(selected, self.bundle_sha, parent)
+                    self.assertEqual(result["outcome"], "untrusted_bundle", result)
+                    load.assert_not_called()
+                    self.assertFalse(marker.exists())
+
+    def test_release_root_aliases_remain_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            alias = pathlib.Path(temporary) / "release-alias"
+            alias.symlink_to(self.bundle, target_is_directory=True)
+            relative = pathlib.Path(os.path.relpath(self.bundle))
+            for selected in (self.bundle, alias, relative):
+                with self.subTest(selected=selected):
+                    self.assertEqual(fast.verify_release(selected, self.bundle_sha)["status"], "trusted")
+
+    def test_linked_worktree_root_remains_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = pathlib.Path(temporary) / "release"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(parent))
+            _git(parent, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            worktree = pathlib.Path(temporary) / "linked"
+            _git(parent, "worktree", "add", "--detach", str(worktree), self.bundle_sha)
+            self.assertTrue((worktree / ".git").is_file())
+            self.assertEqual(fast.verify_release(worktree, self.bundle_sha)["status"], "trusted")
+
+    def test_release_root_with_trailing_whitespace_remains_trusted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary) / "release \n"
+            _git(pathlib.Path(temporary), "clone", "-q", str(self.bundle), str(root))
+            _git(root, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+            self.assertEqual(fast.verify_release(root, self.bundle_sha)["status"], "trusted")
+
     def test_trivial_openai_responses_summarizer_is_ready_for_human(self):
         root = self._repo()
         result = self._run(root)
@@ -124,6 +185,155 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
                 self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), before)
                 self.assertIn("total_ms", result["timings"])
 
+    def test_pre_gate_validation_does_not_execute_target_initialization(self):
+        for entrypoint in ("tests/__init__.py", "app.py", "sitecustomize.py"):
+            with self.subTest(entrypoint=entrypoint):
+                root = self._repo()
+                marker = root.parent / (root.name + "-host-write")
+                self.addCleanup(marker.unlink, missing_ok=True)
+                payload = f"\nopen({str(marker)!r}, 'w').write('target code ran')\n"
+                path = root / entrypoint
+                path.write_text((path.read_text() if path.exists() else "") + payload)
+                _git(root, "add", ".")
+                _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid",
+                     "commit", "-qm", "target initialization fixture")
+
+                with mock.patch.object(fast, "_run", wraps=fast._run) as commands:
+                    result = self._run(root)
+
+                self.assertFalse(marker.exists(), entrypoint)
+                self.assertEqual(result["outcome"], "ready_for_human", result)
+                for command in commands.call_args_list:
+                    argv = command.args[0]
+                    self.assertNotIn("unittest", argv)
+                    if command.kwargs["cwd"] == root:
+                        self.assertEqual(argv[0], "git", argv)
+
+    def test_checker_hidden_from_git_status_never_executes(self):
+        for flag in ("--assume-unchanged", "--skip-worktree"):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = root / "bundle"
+                _git(root, "clone", "-q", str(self.bundle), str(bundle))
+                _git(bundle, "remote", "set-url", "origin", "https://github.com/keelapi/keel-setup.git")
+                marker = root / "checker-executed"
+                (bundle / "scripts/check_release_bundle.py").write_text(
+                    f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+                    "print('PASS: public setup bundle (forged)')\n"
+                )
+                _git(bundle, "update-index", flag, "scripts/check_release_bundle.py")
+                self.assertEqual(_git(bundle, "status", "--porcelain"), "")
+                with self.assertRaises(fast.PipelineFailure):
+                    fast.verify_release(bundle, self.bundle_sha)
+                self.assertFalse(marker.exists())
+
+    def test_documented_orchestrator_ignores_pythonpath_startup_hook(self):
+        root = self._repo()
+        marker = root.parent / (root.name + "-startup-executed")
+        self.addCleanup(marker.unlink, missing_ok=True)
+        (root / "sitecustomize.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\n"
+        )
+        _git(root, "add", ".")
+        _git(root, "-c", "user.name=Keel Test", "-c", "user.email=keel-test@example.invalid",
+             "commit", "-qm", "startup hook fixture")
+        with mock.patch.object(fast, "_run", wraps=fast._run) as calls:
+            self.assertEqual(self._run(self._repo())["outcome"], "ready_for_human")
+        checker_calls = [call.args[0] for call in calls.call_args_list
+                         if any(str(arg).endswith("check_release_bundle.py") for arg in call.args[0])]
+        self.assertTrue(checker_calls)
+        self.assertTrue(all(command[1] == "-I" for command in checker_calls))
+        # Follow the published command shape in a fresh process so Python's own
+        # startup, rather than an in-process mock, is under test.
+        result = subprocess.run(
+            [sys.executable, "-I", str(self.bundle / "keel-setup/scripts/fast_first_run.py"),
+             "--bundle", str(self.bundle), "--bundle-sha", self.bundle_sha, "--repo", str(root)],
+            cwd=root, env={**os.environ, "PYTHONPATH": str(root)},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["outcome"], "ready_for_human")
+        self.assertFalse(marker.exists())
+
+    def test_gate_implementation_matches_standalone_credential_entrypoints(self):
+        for name in ("verify_execute.py", "authoring_context.py", "prepare_voice.py"):
+            module = _load("fast_gate_" + name.removesuffix(".py"), SCRIPT.with_name(name))
+            self.assertEqual(inspect.getsource(fast._verify_pinned_release),
+                             inspect.getsource(module._verify_pinned_release))
+
+    def test_local_helpers_leave_the_authenticated_bundle_clean(self):
+        for relative in (
+            "keel-setup/scripts/inventory.py", "keel-setup/scripts/setup_state.py",
+            "keel-policy/scripts/consume_authoring_context.py",
+            "keel-policy/scripts/validate_enforceability_report.py",
+            "shared/scripts/validate_feedback_report.py",
+        ):
+            with self.subTest(relative=relative):
+                result = subprocess.run(
+                    [sys.executable, "-I", str(self.bundle / relative), "--help"],
+                    capture_output=True, text=True, timeout=20,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(list(self.bundle.rglob("__pycache__")))
+                self.assertEqual(fast.verify_release(self.bundle, self.bundle_sha)["status"], "trusted")
+
+    def test_generated_adapter_supplies_required_names_without_target_imports(self):
+        # These are controlled source fixtures; the pipeline remains compile-only.
+        source = fixtures.GOLDEN_APP.replace("from __future__ import annotations\n", "").replace("import os\n", "").replace("from typing import Any\n", "")
+        source = source.replace("client: Any | None", "client: object | None")
+        source = source.replace('model=model or os.getenv("OPENAI_MODEL", DEFAULT_MODEL)',
+                                "model=model or DEFAULT_MODEL")
+        for with_test in (False, True):
+            with self.subTest(with_test=with_test):
+                root = self._repo(source, with_test=with_test)
+                result = self._run(root)
+                self.assertEqual(result["outcome"], "ready_for_human", result)
+                generated = (root / "app.py").read_text()
+                namespace = {"__name__": "controlled_fixture"}
+                exec(compile(generated, "controlled_fixture.py", "exec"), namespace)
+                response = io.BytesIO(json.dumps({
+                    "status": "completed", "governance": {"decision": "allow"},
+                    "output": {"content": [{"type": "text", "role": "assistant", "text": "summary"}]},
+                }).encode())
+                response.status = 200
+                opener = mock.Mock()
+                opener.open.return_value = response
+                with mock.patch.dict(os.environ, {"KEEL_API_KEY": "test-only-placeholder"}):
+                    self.assertEqual(namespace["summarize"]("test", client=opener), "summary")
+
+    def test_without_coupled_test_runtime_check_is_not_applicable(self):
+        result = self._run(self._repo(with_test=False))
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertIsNone(result["validation"]["focused_compatibility_test"])
+        self.assertEqual(result["validation"]["focused_compatibility_test_status"], "not_applicable")
+
+    def test_repository_fsmonitor_hook_is_not_executed(self):
+        root = self._repo()
+        marker = root / ".git" / "hook-ran"
+        hook = root / ".git" / "untrusted-monitor"
+        hook.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
+        hook.chmod(0o700)
+        _git(root, "config", "core.fsmonitor", str(hook))
+
+        result = self._run(root)
+
+        self.assertFalse(marker.exists())
+        self.assertEqual(result["outcome"], "ready_for_human", result)
+
+    def test_generated_test_syntax_failure_rolls_back(self):
+        root = self._repo()
+        original_generator = fast.generate_adapter
+
+        def invalid_generator(repo, seam):
+            application, test = original_generator(repo, seam)
+            return application, test + fixtures.SYNTAX_FAILURE
+
+        with mock.patch.object(fast, "generate_adapter", side_effect=invalid_generator):
+            result = self._run(root)
+        self.assertEqual(result["outcome"], "validation_failed", result)
+        self.assertEqual(_git(root, "status", "--porcelain=v1", "--untracked-files=all"), "")
+        self.assertFalse((root / ".keel" / "setup-state.json").exists())
+
     def test_client_none_signature_is_preserved(self):
         root = self._repo()
         before = ast.parse((root / "app.py").read_text()).body
@@ -137,12 +347,13 @@ class DeterministicFastFirstRunTest(unittest.TestCase):
         client = next(item for item in result["seam"]["callable_signature"]["parameters"] if item["name"] == "client")
         self.assertEqual(client, {"name": "client", "kind": "keyword_only", "default": None})
 
-    def test_coupled_protocol_double_is_adapted_and_focused_test_passes(self):
+    def test_coupled_protocol_double_is_adapted_and_runtime_test_is_deferred(self):
         root = self._repo()
         result = self._run(root)
         test_source = (root / "tests" / "test_app.py").read_text()
 
         self.assertEqual(result["outcome"], "ready_for_human", result)
+        self.assertEqual(result["validation"]["focused_compatibility_test_status"], "deferred_requires_isolation")
         self.assertIn("FakeClient", test_source)
         self.assertIn("https://api.keelapi.com/v1/execute", test_source)
         self.assertEqual(

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
+import re
+import shlex
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -374,7 +380,8 @@ class FastFirstRunTest(unittest.TestCase):
         self.assertIn("`summarize(text, *, model=None)`", fast)
         self.assertIn("must not silently become", fast)
         self.assertIn("compatibility of the recorded callable parameters and defaults", fast)
-        self.assertIn("run that one focused test before the gate", fast)
+        self.assertIn("There is no pre-gate target execution exception", fast)
+        self.assertIn("Defer runtime compatibility checks until isolated post-gate validation", fast)
         self.assertIn("stop for explicit human direction", fast)
         self.assertIn("Do not run broader tests", fast)
 
@@ -413,7 +420,8 @@ class FastFirstRunTest(unittest.TestCase):
         deterministic = text.index("### Deterministic golden path")
         fallback = text.index("### Model-driven fallback")
         direct_state_command = text.index(
-            "python3 keel-setup/scripts/setup_state.py --repo-root . --state .keel/setup-state.json"
+            'python3 -I "$BUNDLE/keel-setup/scripts/setup_state.py" --repo-root . --state .keel/setup-state.json',
+            fallback,
         )
 
         self.assertGreater(direct_state_command, fallback)
@@ -592,6 +600,113 @@ happened yet."""
             "An environment variable is transcript hygiene, not process isolation",
         ):
             self.assertIn(required, text)
+
+
+class PublishedHelperBoundaryTest(unittest.TestCase):
+    """Run the documented commands with a hostile application working directory."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.app = self.root / "application with spaces"
+        self.app.mkdir()
+        self.bundle = self.root / "verified bundle with spaces"
+        self.bundle.mkdir()
+        source = SKILL.parents[1]
+        for relative in ("keel-setup/scripts", "keel-setup/reference", "shared/scripts"):
+            shutil.copytree(source / relative, self.bundle / relative)
+        self.marker = self.app / "counterfeit-executed"
+        (self.app / "sitecustomize.py").write_text(
+            f"from pathlib import Path\nPath({str(self.marker)!r}).touch()\n"
+        )
+        for relative in ("keel-setup/scripts/inventory.py", "keel-setup/scripts/setup_state.py",
+                         "scripts/inventory.py"):
+            target = self.app / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(self.marker)!r}).touch()\n"
+                "print('forged setup result')\n", encoding="utf-8",
+            )
+        (self.app / ".gitignore").write_text(".keel/\n", encoding="utf-8")
+        _write_openai_seam(self.app / "app.py")
+        self.git("init", "-q")
+        self.git("add", ".")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "application")
+        (self.app / "prepared.py").write_text(
+            "def route(payload):\n    return post('/v1/execute', json=payload)\n",
+            encoding="utf-8",
+        )
+        self.revision = self.git("rev-parse", "HEAD").strip()
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.app), *args], check=True,
+                              capture_output=True, text=True).stdout
+
+    def commands(self, helper):
+        text = SKILL.read_text(encoding="utf-8").replace("\\\n", " ")
+        return [line.strip() for line in text.splitlines()
+                if line.strip().startswith("python3 ") and f"/{helper}.py" in line]
+
+    def run_command(self, command):
+        args = shlex.split(command)
+        args[0] = sys.executable
+        replacements = {"$BUNDLE": str(self.bundle), "40_HEX_SHA": "a" * 40,
+                        "PROVIDER": "openai", "REVISION": self.revision,
+                        "PATH": "prepared.py"}
+        args = [replacements.get(arg, arg.replace("$BUNDLE", str(self.bundle))) for arg in args]
+        result = subprocess.run(args, cwd=self.app, capture_output=True, text=True,
+                                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(self.app)}, timeout=20)
+        self.assertFalse(self.marker.exists(), "published command executed a target-side helper")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_inventory_commands_ignore_counterfeits_and_scan_application(self):
+        commands = self.commands("inventory")
+        self.assertTrue(commands)
+        for command in commands:
+            with self.subTest(command=command):
+                report = json.loads(self.run_command(command))
+                self.assertIn("app.py", json.dumps(report))
+        self.assertTrue(any("--fast" not in command for command in commands),
+                        "deep inventory must also publish a rooted command")
+
+    def test_state_commands_ignore_counterfeits_and_preserve_application_state(self):
+        state = self.app / ".keel/setup-state.json"
+        commands = self.commands("setup_state")
+        self.assertGreaterEqual(len(commands), 2)
+        for command in commands:
+            self.run_command(command)
+        updated = json.loads(state.read_text())
+        self.assertEqual(updated["stage"], "waiting_for_human")
+        self.assertEqual(updated["changed_paths"], ["prepared.py"])
+        self.assertFalse((self.bundle / ".keel").exists())
+
+    def test_symlinked_target_helpers_are_also_ignored(self):
+        payload = self.app / "payload.py"
+        payload.write_bytes((self.app / "keel-setup/scripts/inventory.py").read_bytes())
+        for relative in ("keel-setup/scripts/inventory.py", "keel-setup/scripts/setup_state.py",
+                         "scripts/inventory.py"):
+            target = self.app / relative
+            target.unlink()
+            target.symlink_to(payload)
+        self.test_inventory_commands_ignore_counterfeits_and_scan_application()
+        self.test_state_commands_ignore_counterfeits_and_preserve_application_state()
+
+    def test_all_published_helper_commands_use_the_authenticated_root(self):
+        text = SKILL.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.strip().startswith("python3 "):
+                self.assertRegex(line.strip(), r'^python3 -I "\$BUNDLE/[^" ]+\.py"(?: |$)')
+        for document in SKILL.parents[1].rglob("*.md"):
+            for line in document.read_text().splitlines():
+                if line.strip().startswith("python3 ") and ".py" in line:
+                    self.assertTrue(line.strip().startswith("python3 -I "),
+                                    f"unisolated published command in {document}: {line}")
+        self.assertIn("canonical absolute", text)
+        self.assertIn("symlink", text)
 
 
 if __name__ == "__main__":

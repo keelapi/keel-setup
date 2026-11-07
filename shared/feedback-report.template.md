@@ -31,7 +31,7 @@ the appropriate manual channel. A security concern must use a private security c
 Validate and preview locally:
 
 ```text
-python3 shared/scripts/validate_feedback_report.py report.json --preview
+python3 -I shared/scripts/validate_feedback_report.py report.json --preview
 ```
 
 For every populated optional-context field, add its separate flag only after the human approves that

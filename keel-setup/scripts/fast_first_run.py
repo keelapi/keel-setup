@@ -13,6 +13,8 @@ import ast
 import collections
 import difflib
 import importlib.util
+import hashlib
+import stat
 import json
 import os
 import pathlib
@@ -124,11 +126,11 @@ def _run(
         raise PipelineFailure("validation_failed", f"bounded command failed: {argv[0]}: {exc}") from exc
 
 
-def _git(repo: pathlib.Path, *args: str, timeout: int = 10) -> str:
-    result = _run(["git", "-C", str(repo), *args], cwd=repo, timeout=timeout)
+def _git(repo: pathlib.Path, *args: str, timeout: int = 10, path_output: bool = False) -> str:
+    result = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), *args], cwd=repo, timeout=timeout)
     if result.returncode != 0:
         raise PipelineFailure("validation_failed", f"git {' '.join(args)} failed")
-    return result.stdout.strip()
+    return result.stdout.removesuffix("\n") if path_output else result.stdout.strip()
 
 
 def _load_module(name: str, path: pathlib.Path):
@@ -140,6 +142,149 @@ def _load_module(name: str, path: pathlib.Path):
     return module
 
 
+def _verify_pinned_release(bundle_sha: str, *, bundle: pathlib.Path | None = None) -> None:
+    """Authenticate the complete pinned snapshot without executing bundle code.
+
+    Each standalone entrypoint carries this gate because a sibling import cannot
+    establish its own trust. The entrypoint and caller-supplied pin are trusted.
+    An explicit bundle is used only by the orchestrator; credential commands
+    always derive their bundle from the trusted entrypoint's installation path.
+    """
+    try:
+        if re.fullmatch(r"[0-9a-f]{40}", bundle_sha) is None:
+            raise ValueError("invalid bundle SHA")
+        bundle = (pathlib.Path(__file__).resolve().parents[2] if bundle is None else bundle.resolve())
+
+        def git(*args: str) -> bytes:
+            """Read local Git data without inherited configuration or hooks."""
+            result = subprocess.run(
+                ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+                 "-C", str(bundle), *args],
+                env={
+                    "PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C",
+                    "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_NO_LAZY_FETCH": "1", "GIT_OPTIONAL_LOCKS": "0",
+                },
+                capture_output=True, timeout=20, check=True,
+            )
+            return result.stdout
+
+        worktree = pathlib.Path(git("rev-parse", "--show-toplevel").decode().removesuffix("\n")).resolve()
+        if bundle != worktree:
+            raise ValueError("bundle must be the Git worktree root")
+        if git("rev-parse", "HEAD").decode().strip() != bundle_sha:
+            raise ValueError("bundle revision mismatch")
+        if git("remote", "get-url", "origin").decode().strip() not in {
+            "https://github.com/keelapi/keel-setup",
+            "https://github.com/keelapi/keel-setup.git",
+            "git@github.com:keelapi/keel-setup.git",
+            "ssh://git@github.com/keelapi/keel-setup.git",
+        }:
+            raise ValueError("unofficial bundle origin")
+        if git("diff", "--cached", "--name-only", "--no-ext-diff", "--no-textconv", bundle_sha):
+            raise ValueError("bundle index is not clean")
+
+        def object_bytes(kind: str, oid: str) -> bytes:
+            """Authenticate raw Git objects, including the commit and trees."""
+            if re.fullmatch(r"[0-9a-f]{40}", oid) is None:
+                raise ValueError("invalid object ID")
+            size = int(git("cat-file", "-s", oid))
+            if not 0 <= size <= 8 * 1024 * 1024:
+                raise ValueError("bundle object exceeds verification limit")
+            data = git("cat-file", kind, oid)
+            header = f"{kind} {len(data)}\0".encode("ascii")
+            if len(data) != size or hashlib.sha1(header + data).hexdigest() != oid:
+                raise ValueError("Git object differs from its authenticated ID")
+            return data
+
+        commit = object_bytes("commit", bundle_sha)
+        tree_line = commit.split(b"\n", 1)[0]
+        if re.fullmatch(rb"tree [0-9a-f]{40}", tree_line) is None:
+            raise ValueError("invalid pinned commit tree")
+        files: dict[pathlib.PurePosixPath, bytes] = {}
+        total_bytes = 0
+
+        def tree_files(oid: str, parent: pathlib.PurePosixPath) -> None:
+            """Walk only entries from independently authenticated tree objects."""
+            nonlocal total_bytes
+            if len(parent.parts) > 32:
+                raise ValueError("bundle tree exceeds depth limit")
+            data = object_bytes("tree", oid)
+            offset = 0
+            names: set[str] = set()
+            while offset < len(data):
+                end = data.index(b"\0", offset)
+                mode, raw_name = data[offset:end].split(b" ", 1)
+                name = raw_name.decode("utf-8")
+                if (name in {"", ".", ".."} or name.lower() == ".git"
+                        or "/" in name or name in names):
+                    raise ValueError("unsafe or duplicate bundle entry")
+                names.add(name)
+                raw_oid = data[end + 1:end + 21]
+                if len(raw_oid) != 20:
+                    raise ValueError("truncated bundle tree")
+                offset = end + 21
+                relative = parent / name
+                if mode == b"40000":
+                    tree_files(raw_oid.hex(), relative)
+                elif mode in {b"100644", b"100755"}:
+                    if len(files) >= 4096:
+                        raise ValueError("bundle exceeds file limit")
+                    content = object_bytes("blob", raw_oid.hex())
+                    total_bytes += len(content)
+                    if total_bytes > 64 * 1024 * 1024:
+                        raise ValueError("bundle exceeds byte limit")
+                    files[relative] = content
+                else:
+                    raise ValueError("unsupported bundle entry")
+
+        tree_files(tree_line[5:].decode("ascii"), pathlib.PurePosixPath())
+        if not files:
+            raise ValueError("empty bundle tree")
+
+        # Include ignored additions and reject symlinked directories. Git metadata
+        # alone is exempt, including the .git file used by linked worktrees.
+        actual: set[pathlib.PurePosixPath] = set()
+        def walk_error(error: OSError) -> None:
+            """Fail closed when any part of the checkout cannot be enumerated."""
+            raise error
+
+        for current, directories, filenames in os.walk(bundle, followlinks=False, onerror=walk_error):
+            directory = pathlib.Path(current)
+            if directory == bundle:
+                directories[:] = [name for name in directories if name != ".git"]
+                filenames = [name for name in filenames if name != ".git"]
+            for name in directories:
+                if (directory / name).is_symlink():
+                    raise ValueError("symlink in bundle directory")
+            actual.update(pathlib.PurePosixPath((directory / name).relative_to(bundle).as_posix())
+                          for name in filenames)
+        if actual != set(files):
+            raise ValueError("checkout files differ from the pinned allowlist")
+
+        # Descriptor-relative traversal refuses parent symlinks. Nonblocking open
+        # and fstat reject FIFOs/devices before reading, with bounded file reads.
+        for relative, expected in files.items():
+            directory_fd = os.open(bundle, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                for part in relative.parts[:-1]:
+                    child_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                       dir_fd=directory_fd)
+                    os.close(directory_fd)
+                    directory_fd = child_fd
+                fd = os.open(relative.name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW,
+                             dir_fd=directory_fd)
+                with os.fdopen(fd, "rb") as stream:
+                    if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                        raise ValueError("bundle entry is not a regular file")
+                    if stream.read(len(expected) + 1) != expected:
+                        raise ValueError("bundle file differs from pinned bytes")
+            finally:
+                os.close(directory_fd)
+    except Exception as exc:
+        raise RuntimeError("pinned release verification failed") from exc
+
+
 def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
     """Verify public checkout identity, immutable revision, cleanliness, and bundle manifest."""
 
@@ -147,6 +292,16 @@ def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
         raise PipelineFailure("untrusted_bundle", "bundle SHA must be 40 lowercase hexadecimal characters")
     if not bundle.is_dir():
         raise PipelineFailure("untrusted_bundle", "bundle path is not a directory")
+    bundle = bundle.resolve()
+    # Git discovers enclosing repositories; bind its facts to the directory
+    # supplying executable bundle files before inspecting or running those files.
+    worktree_root = pathlib.Path(_git(bundle, "rev-parse", "--show-toplevel", path_output=True)).resolve()
+    if bundle != worktree_root:
+        raise PipelineFailure("untrusted_bundle", "bundle path must be the Git worktree root")
+    try:
+        _verify_pinned_release(expected_sha, bundle=bundle)
+    except RuntimeError as exc:
+        raise PipelineFailure("untrusted_bundle", "pinned bundle byte authentication failed") from exc
     head = _git(bundle, "rev-parse", "HEAD")
     if head != expected_sha:
         raise PipelineFailure("untrusted_bundle", "bundle checkout does not match the requested immutable SHA")
@@ -158,7 +313,7 @@ def verify_release(bundle: pathlib.Path, expected_sha: str) -> dict[str, Any]:
     verifier = bundle / "scripts" / "check_release_bundle.py"
     if not verifier.is_file():
         raise PipelineFailure("untrusted_bundle", "bundle verifier is missing")
-    checked = _run([sys.executable, str(verifier)], cwd=bundle, timeout=20)
+    checked = _run([sys.executable, "-I", str(verifier)], cwd=bundle, timeout=20)
     if checked.returncode != 0 or "PASS: public setup bundle" not in checked.stdout:
         raise PipelineFailure("untrusted_bundle", "public allowlist, provenance, or checksum verification failed")
     try:
@@ -577,7 +732,7 @@ def generate_adapter(repo: pathlib.Path, seam: GoldenSeam) -> tuple[str, str | N
         if line.startswith("from __future__ import"):
             import_line = index + 1
             break
-    import_block = "\nimport json\nimport secrets\nimport time\nimport urllib.error\nimport urllib.request\n"
+    import_block = "\nimport os\nfrom typing import Any\nimport json\nimport secrets\nimport time\nimport urllib.error\nimport urllib.request\n"
     lines.insert(import_line, import_block)
     application = "".join(lines)
     test_source = _generate_coupled_test(repo, seam) if seam.coupled_test else None
@@ -721,7 +876,7 @@ def validate_patch(
     if re.search(r"(?i)KEEL_API_KEY\s*[:=]\s*['\"][^'\"]+", after_source):
         raise PipelineFailure("validation_failed", "generated source contains a credential value")
     status = _run(
-        ["git", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
+        ["git", "-c", "core.fsmonitor=false", "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=repo,
     )
     if status.returncode != 0:
@@ -736,14 +891,14 @@ def validate_patch(
     if seam.coupled_test:
         module = seam.coupled_test.with_suffix("").as_posix().replace("/", ".")
         focused_test = f"{module}.SummarizerTests.test_sends_text_to_the_selected_model"
-        tested = _run(
-            [sys.executable, "-m", "unittest", focused_test, "-v"],
-            cwd=repo,
-            timeout=15,
-            env=SAFE_SUBPROCESS_ENV,
-        )
-        if tested.returncode != 0:
-            raise PipelineFailure("validation_failed", "the one focused callable-compatibility test failed")
+        # Test collection imports target packages and application initialization.
+        # A reduced environment and timeout do not isolate the host. Only compile
+        # here; runtime compatibility requires isolated post-gate execution.
+        try:
+            compile(repo.joinpath(*seam.coupled_test.parts).read_text(encoding="utf-8"),
+                    seam.coupled_test.as_posix(), "exec")
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            raise PipelineFailure("validation_failed", "generated compatibility test does not compile") from exc
     return {
         "callable_signature_compatible": True,
         "compile_without_import": True,
@@ -755,6 +910,7 @@ def validate_patch(
         "credential_value_absent": True,
         "changed_paths": sorted(allowed_paths),
         "focused_compatibility_test": focused_test,
+        "focused_compatibility_test_status": "deferred_requires_isolation" if focused_test else "not_applicable",
     }
 
 
@@ -764,14 +920,14 @@ def _write(path: pathlib.Path, content: str) -> None:
 
 
 def _ensure_state_ignored(repo: pathlib.Path) -> bool:
-    checked = _run(["git", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
+    checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode == 0:
         return False
     path = repo / ".gitignore"
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     suffix = "" if not existing or existing.endswith("\n") else "\n"
     _write(path, existing + suffix + ".keel/setup-state.json\n")
-    checked = _run(["git", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
+    checked = _run(["git", "-c", "core.fsmonitor=false", "-C", str(repo), "check-ignore", "-q", ".keel/setup-state.json"], cwd=repo)
     if checked.returncode != 0:
         raise PipelineFailure("validation_failed", "local setup state could not be git-ignored")
     return True
@@ -894,6 +1050,7 @@ def run_pipeline(bundle: pathlib.Path, bundle_sha: str, repo: pathlib.Path) -> d
     originals: dict[pathlib.PurePosixPath, bytes | None] = {}
     edited = False
     try:
+        bundle = bundle.resolve()
         mark = time.perf_counter()
         trust = verify_release(bundle, bundle_sha)
         timings["release_trust_ms"] = round((time.perf_counter() - mark) * 1000, 3)

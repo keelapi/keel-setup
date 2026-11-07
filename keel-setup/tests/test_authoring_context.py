@@ -721,8 +721,8 @@ class SourceCustodyTest(unittest.TestCase):
 
     def test_helper_is_standard_library_only(self):
         allowed = {
-            "__future__", "argparse", "decimal", "getpass", "importlib", "json",
-            "pathlib", "re", "secrets", "sys", "time", "urllib", "warnings", "typing",
+            "__future__", "hashlib", "os", "stat", "argparse", "decimal", "getpass", "importlib", "json",
+            "pathlib", "re", "secrets", "subprocess", "sys", "time", "urllib", "warnings", "typing",
         }
         imports = [
             line.strip()
@@ -737,7 +737,9 @@ class SourceCustodyTest(unittest.TestCase):
     def test_helper_never_reads_a_credential_environment_variable(self):
         for reader in ("os.environ", "os.getenv", "environ[", "environ.get", "getenv("):
             self.assertNotIn(reader, self.source)
-        self.assertNotIn("import os", self.source)
+        self.assertIn("os.O_RDONLY", self.source)
+        self.assertNotIn("os.O_WRONLY", self.source)
+        self.assertNotIn("os.O_RDWR", self.source)
 
     def test_helper_declares_no_credential_argument(self):
         for word in ("--key", "--api-key", "--token", "--secret", "--credential"):
@@ -756,8 +758,14 @@ class SourceCustodyTest(unittest.TestCase):
         for verb in ('"POST"', '"PUT"', '"PATCH"', '"DELETE"'):
             self.assertNotIn(verb, self.source)
 
-    def test_helper_starts_no_subprocess(self):
-        self.assertNotIn("subprocess", self.source)
+    def test_subprocess_is_confined_to_read_only_release_gate(self):
+        gate = self.source.split("def _verify_pinned_release(", 1)[1].split(
+            "def _read_hidden_runtime_key", 1
+        )[0]
+        self.assertEqual(self.source.count("subprocess.run("), 1)
+        self.assertIn("subprocess.run(", gate)
+        self.assertIn('"--no-replace-objects"', gate)
+        self.assertNotIn("exec_module", self.source)
 
 
 
