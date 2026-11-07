@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_RELEASE_VERSION = "2026-10-22.1"
-PRODUCT_SOURCE_SHA256 = "bb8f62c2b0c44a58dab79e9512a8a0cbf56171c564508c159d67e3518dae5cd0"
+PRODUCT_SOURCE_SHA256 = "ce0c7e1e0affcfb30497fab2762e1901ec7f78830b70209b9709a9b88c42e85c"
 PUBLICATION_LAYER_FILES = [
     ".github/workflows/ci.yml",
     ".gitignore",
@@ -88,12 +88,14 @@ NETWORK_RUNTIME_EXCEPTIONS = frozenset(
 def _files() -> set[str]:
     result: set[str] = set()
     for path in ROOT.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+        if ".git" in path.relative_to(ROOT).parts:
             continue
-        if ".pytest_cache" in path.parts:
-            continue
+        if path.name in {"__pycache__", ".pytest_cache"} or path.suffix in {".pyc", ".pyo"}:
+            raise ValueError("executable caches are not allowed in the release bundle")
         if path.is_symlink():
             raise ValueError(f"symlink is not allowed in the release bundle: {path}")
+        if not path.is_file():
+            continue
         result.add(path.relative_to(ROOT).as_posix())
     return result
 

@@ -41,6 +41,21 @@ def _git(root: pathlib.Path, *args: str) -> str:
 
 
 class DeterministicFastFirstRunTest(unittest.TestCase):
+    def test_fallback_release_checker_rejects_bytecode_and_cache_entries(self):
+        checker = _load("fallback_bundle_check", ROOT / "scripts/check_release_bundle.py")
+        for relative in ("shared/scripts/__pycache__/schema_validation.pyc", "shared/scripts/schema_validation.pyc",
+                         "shared/scripts/__pycache__"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.name == "__pycache__":
+                    path.mkdir()
+                else:
+                    path.write_bytes(b"unmeasured executable cache")
+                with mock.patch.object(checker, "ROOT", root), self.assertRaisesRegex(ValueError, "caches"):
+                    checker._files()
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.bundle_temp = tempfile.TemporaryDirectory()
