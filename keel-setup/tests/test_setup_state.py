@@ -59,6 +59,26 @@ def _write_prepared(path: pathlib.Path) -> None:
 
 
 class SchemaTest(unittest.TestCase):
+    def test_state_reads_refuse_unsafe_files_and_bounded_json(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "state.json"
+            for raw in (b"x" * (setup_state.MAX_STATE_BYTES + 1), b"[" * 40 + b"0" + b"]" * 40):
+                path.write_bytes(raw)
+                with self.assertRaises(ValueError):
+                    setup_state.read_state(path, root)
+            path.unlink()
+            os.mkfifo(path)
+            with self.assertRaises(ValueError):
+                setup_state.read_state(path, root)
+            path.unlink()
+            path.symlink_to(root.parent / "outside-state.json")
+            with self.assertRaises(OSError):
+                setup_state.read_state(path, root)
+            with self.assertRaises(ValueError):
+                setup_state.read_state(root.parent / "outside-state.json", root)
+
     def test_shipped_shape_validates(self):
         self.assertEqual(setup_state.validate_state(_valid()), [])
 
@@ -584,7 +604,7 @@ class CommandLineTest(unittest.TestCase):
             path = pathlib.Path(directory) / "setup-state.json"
             path.write_text(json.dumps(_valid()))
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                code = setup_state.main(["--validate-only", "--state", str(path)])
+                code = setup_state.main(["--validate-only", "--state", str(path), "--repo-root", directory])
         self.assertEqual(code, 0)
 
     def test_helper_takes_no_credential_argument(self):

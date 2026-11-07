@@ -12,14 +12,16 @@ Exit 0 = the state is usable. Exit 1 = the state was refused or invalid.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import json
 import os
 import pathlib
 import re
+import secrets
+import stat
 import subprocess
 import sys
-import tempfile
 from typing import Any
 
 sys.dont_write_bytecode = True
@@ -33,6 +35,8 @@ DEFAULT_STATE_PATH = pathlib.PurePosixPath(".keel/setup-state.json")
 
 SCHEMA_VERSION = "1.0"
 MAX_STRING_LENGTH = 512
+MAX_STATE_BYTES = 32_768
+MAX_STATE_DEPTH = 32
 REQUIRED_PRE_GATE_CHECKS = (
     "syntax_or_compile",
     "fail_closed_integration_review",
@@ -354,36 +358,93 @@ def is_git_ignored(repo_root: pathlib.Path, relative: pathlib.PurePosixPath) -> 
     return None
 
 
-def write_state_atomically(state_path: pathlib.Path, state: dict[str, Any]) -> None:
+@contextlib.contextmanager
+def _state_parent(state_path: pathlib.Path, repo_root: pathlib.Path, *, create: bool = False):
+    root = repo_root.resolve(strict=True)
+    lexical_root = pathlib.Path(os.path.abspath(repo_root))
+    candidate = state_path if state_path.is_absolute() else lexical_root / state_path
+    try:
+        relative = candidate.relative_to(lexical_root)
+    except ValueError:
+        relative = candidate.relative_to(root)
+    if not relative.parts or any(part in {".", ".."} for part in relative.parts):
+        raise ValueError("state path must be inside the repository")
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in relative.parts[:-1]:
+            if create:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd, relative.name
+    finally:
+        os.close(fd)
+
+
+def read_state(state_path: pathlib.Path, repo_root: pathlib.Path) -> Any:
+    with _state_parent(state_path, repo_root) as (parent, name):
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=parent)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_STATE_BYTES:
+                raise ValueError("state must be a bounded regular file")
+            raw = stream.read(MAX_STATE_BYTES + 1)
+    if len(raw) > MAX_STATE_BYTES:
+        raise ValueError("state exceeds its byte limit")
+    depth = 0
+    quoted = escaped = False
+    for char in raw.decode("utf-8"):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char in "[{":
+            depth += 1
+            if depth > MAX_STATE_DEPTH:
+                raise ValueError("state exceeds its nesting limit")
+        elif char in "]}":
+            depth -= 1
+    return json.loads(raw)
+
+
+def write_state_atomically(state_path: pathlib.Path, state: dict[str, Any], repo_root: pathlib.Path | None = None) -> None:
     """Persist validated continuity without ever exposing a partial JSON file."""
 
     failures = validate_state(state)
     if failures:
         raise ValueError("refusing to persist invalid local setup state: " + "; ".join(failures))
 
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path: pathlib.Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=state_path.parent,
-            prefix=f".{state_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            temporary_path = pathlib.Path(handle.name)
-            os.chmod(temporary_path, 0o600)
-            json.dump(state, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, state_path)
-        temporary_path = None
-    finally:
-        if temporary_path is not None:
+    raw = (json.dumps(state, indent=2, sort_keys=True) + "\n").encode()
+    if len(raw) > MAX_STATE_BYTES:
+        raise ValueError("state exceeds its byte limit")
+    with _state_parent(state_path, repo_root or state_path.parent, create=True) as (parent, name):
+        try:
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("state must be a regular nonsymlink file")
+        temporary_name = f".setup-state-{secrets.token_hex(16)}.tmp"
+        try:
+            fd = os.open(temporary_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(raw)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, name, src_dir_fd=parent, dst_dir_fd=parent)
+        finally:
             try:
-                temporary_path.unlink()
+                os.unlink(temporary_name, dir_fd=parent)
             except FileNotFoundError:
                 pass
 
@@ -395,30 +456,30 @@ def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
     continuity = "resumed"
     continuity_reason: str | None = None
     problems: list[str] = []
+    unsafe_file = False
     try:
-        raw = state_path.read_text(encoding="utf-8")
-    except OSError:
+        loaded = read_state(state_path, repo_root)
+    except FileNotFoundError:
         state = initial_state(updated_at=now)
         continuity = "lost"
         continuity_reason = "no local state file was readable at this path"
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
+        unsafe_file = not isinstance(exc, json.JSONDecodeError)
+        state = initial_state(updated_at=now)
+        continuity = "lost"
+        continuity_reason = "local state file was refused"
+        problems = ["local state must be bounded JSON in a regular repository file"]
     else:
-        try:
-            loaded = json.loads(raw)
-        except json.JSONDecodeError as exc:
+        problems = validate_state(loaded)
+        problems.extend(validate_prepared_paths(loaded, repo_root))
+        if problems:
             state = initial_state(updated_at=now)
             continuity = "lost"
-            continuity_reason = f"local state file is not valid JSON: {exc}"
+            continuity_reason = "local state file was refused; see refusals"
         else:
-            problems = validate_state(loaded)
-            problems.extend(validate_prepared_paths(loaded, repo_root))
-            if problems:
-                state = initial_state(updated_at=now)
-                continuity = "lost"
-                continuity_reason = "local state file was refused; see refusals"
-            else:
-                state = dict(loaded)
-                state["invocation_count"] = int(state["invocation_count"]) + 1
-                state["updated_at"] = now
+            state = dict(loaded)
+            state["invocation_count"] = int(state["invocation_count"]) + 1
+            state["updated_at"] = now
 
     stage = state.get("stage")
     relative = state_path
@@ -430,9 +491,11 @@ def begin(state_path: pathlib.Path, repo_root: pathlib.Path) -> dict[str, Any]:
 
     state_persisted = False
     persistence_error: str | None = None
-    if ignored is True:
+    if unsafe_file:
+        persistence_error = "unsafe local state path or contents were refused"
+    elif ignored is True:
         try:
-            write_state_atomically(state_path, state)
+            write_state_atomically(state_path, state, repo_root)
         except (OSError, ValueError) as exc:
             persistence_error = f"local state was not persisted: {exc}"
         else:
@@ -478,8 +541,8 @@ def mark_waiting_for_human(
     """Persist only the local-preparation milestone; never runtime or authority state."""
 
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        state = read_state(state_path, repo_root)
+    except (OSError, ValueError, UnicodeError, RecursionError) as exc:
         return [f"local state must be initialized before recording the human gate: {exc}"]
     failures = validate_state(state)
     if failures:
@@ -541,7 +604,7 @@ def mark_waiting_for_human(
     if failures:
         return failures
     try:
-        write_state_atomically(state_path, updated)
+        write_state_atomically(state_path, updated, repo_root)
     except (OSError, ValueError) as exc:
         return [f"local state was not persisted: {exc}"]
     return []
@@ -603,8 +666,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.validate_only:
         try:
-            state = json.loads(args.state.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            state = read_state(args.state, args.repo_root)
+        except (OSError, ValueError, UnicodeError, RecursionError) as exc:
             print(f"unreadable local state: {exc}", file=sys.stderr)
             return 1
         failures = validate_state(state)
