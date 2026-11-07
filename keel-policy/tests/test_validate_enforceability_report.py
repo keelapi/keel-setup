@@ -47,6 +47,17 @@ def add_policy(candidate, field, action="allow"):
 
 
 class EnforceabilityValidatorTest(unittest.TestCase):
+    def test_implicit_action_facts_cannot_be_omitted_or_downgraded(self):
+        candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider", "deny_if_model_not_in")
+        candidate["policy"]["rules"][0]["params"] = {"allowed": ["example-model"]}
+        self.assertTrue(any("model" in error and "no enforceability" in error for error in validate(candidate)))
+        for action in ("deny_if_rate_exceeds", "throttle_if_rate_exceeds", "deny_if_spike_detected",
+                       "deny_if_projected_monthly_ratio_exceeds", "require_budget_envelope"):
+            candidate["policy"]["rules"][0]["action"] = action
+            self.assertTrue(any("no pinned trusted evidence" in error for error in validate(candidate)), action)
+        candidate["policy"]["rules"][0].update(action="deny_if_cost_exceeds", params={"window": "request", "cap_micros": 100})
+        self.assertTrue(any("estimated_cost_usd_micros" in error for error in validate(candidate)))
+
     def test_empty_compounds_cannot_drive_automatic_actions_at_any_depth(self):
         for condition in ({"all": []}, {"any": []}, {"not": {"all": []}},
                           {"all": [{"field": "provider", "op": "eq", "value": "openai"}, {"any": []}]}):

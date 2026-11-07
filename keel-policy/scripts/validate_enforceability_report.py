@@ -21,6 +21,26 @@ POLICY_SCHEMA = ROOT / "keel-policy" / "reference" / "policy-document.schema.jso
 BOUND_TOOL_NAME = "context._keel.action_envelope.connector.tool_name.value"
 PROHIBITED_KEYS = {"certified_action_contract_id", "activation", "is_active", "credential", "api_key", "token"}
 NON_EFFECTING_ACTIONS = {"preview"}
+ACTION_DEPENDENCIES: dict[str, tuple[str, ...] | None] = {
+    "allow": (), "deny": (), "preview": (), "require_human_review": (),
+    "constrain_max_output_tokens": (), "constrain_permit_lifetime": (),
+    "deny_if_model_not_in": ("model",),
+    "deny_if_cost_exceeds": ("estimated_cost_usd_micros", "context._keel.action_envelope.pricing.estimated_cost_usd_micros.state"),
+    # These handlers consume runtime capabilities/facts for which this bundle
+    # publishes no independently trusted offline evidence contract.
+    "deny_if_rate_exceeds": None, "throttle_if_rate_exceeds": None,
+    "deny_if_spike_detected": None, "deny_if_projected_monthly_ratio_exceeds": None,
+    "require_budget_envelope": None, "constrain_permit_target": None,
+    "constrain_work_authority": None,
+}
+
+
+def _action_dependencies(rule: dict[str, Any]) -> tuple[str, ...] | None:
+    action = rule.get("action")
+    params = rule.get("params")
+    if action == "deny_if_cost_exceeds" and (not isinstance(params, dict) or params.get("window") != "request"):
+        return None  # Window spend is not a published field/capability contract.
+    return ACTION_DEPENDENCIES.get(action)
 
 
 def _walk(value: Any):
@@ -62,6 +82,8 @@ def validate(
             failures.append(f"prohibited authority or certified-contract field: {key}")
 
     public_fields = set(manifest.get("fields", {}).get("PUBLIC", []))
+    if set(ACTION_DEPENDENCIES) != set(manifest.get("actions", {}).get("PUBLIC", [])):
+        failures.append("action semantics table does not exactly cover the public action set")
     provenance = provenance_artifact.get("fields", {}) if isinstance(provenance_artifact, dict) else {}
     if provenance_artifact.get("schema_version") != "1.0" or set(provenance) != public_fields:
         failures.append("pinned field-provenance artifact does not exactly cover the published field set")
@@ -105,6 +127,11 @@ def validate(
             fields = _condition_fields(rule.get("if"))
             if rule.get("action") not in NON_EFFECTING_ACTIONS and not fields:
                 failures.append(f"policy.rules[{rule_index}] automatic action requires a trusted condition leaf")
+            dependencies = _action_dependencies(rule)
+            if dependencies is None:
+                failures.append(f"policy.rules[{rule_index}] implicit runtime facts/capabilities have no pinned trusted evidence contract")
+                dependencies = ()
+            fields = sorted(set(fields) | set(dependencies))
             for field in fields:
                 matching = by_field.get(field, [])
                 if not matching:
@@ -118,6 +145,8 @@ def validate(
                             failures.append(
                                 f"policy.rules[{rule_index}] automatic action uses field {field!r} without independently trusted enforceability[{entry_index}]"
                             )
+                        if field in dependencies and item.get("surface") != "managed_execute":
+                            failures.append(f"policy.rules[{rule_index}] implicit field {field!r} requires the managed_execute surface")
     return failures
 
 
