@@ -47,6 +47,13 @@ def add_policy(candidate, field, action="allow"):
 
 
 class EnforceabilityValidatorTest(unittest.TestCase):
+    def test_empty_compounds_cannot_drive_automatic_actions_at_any_depth(self):
+        for condition in ({"all": []}, {"any": []}, {"not": {"all": []}},
+                          {"all": [{"field": "provider", "op": "eq", "value": "openai"}, {"any": []}]}):
+            candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider")
+            candidate["policy"]["rules"][0]["if"] = condition
+            self.assertTrue(validate(candidate), condition)
+
     def test_action_name_requires_untrusted_status_and_exact_replacement(self):
         self.assertEqual(validate(report()), [])
         self.assertTrue(validate(report(status="trusted")))

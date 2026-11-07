@@ -103,6 +103,8 @@ def validate(
             if not isinstance(rule, dict):
                 continue
             fields = _condition_fields(rule.get("if"))
+            if rule.get("action") not in NON_EFFECTING_ACTIONS and not fields:
+                failures.append(f"policy.rules[{rule_index}] automatic action requires a trusted condition leaf")
             for field in fields:
                 matching = by_field.get(field, [])
                 if not matching:

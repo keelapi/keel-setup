@@ -21,7 +21,8 @@
             ]
           },
           "title": "All",
-          "type": "array"
+          "type": "array",
+          "minItems": 1
         }
       },
       "required": [
@@ -106,7 +107,8 @@
             ]
           },
           "title": "Any",
-          "type": "array"
+          "type": "array",
+          "minItems": 1
         }
       },
       "required": [
