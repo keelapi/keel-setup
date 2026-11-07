@@ -8,6 +8,7 @@ cannot silently drift behind them.
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from datetime import datetime
@@ -70,6 +71,18 @@ def validate(
     *,
     root_schema: dict[str, Any] | None = None,
 ) -> list[str]:
+    if root_schema is None:
+        # JSON numbers must be finite, including values in open objects and
+        # overflowed exponents. Check direct library callers as well as JSON.
+        pending = [(path, instance)]
+        while pending:
+            location, value = pending.pop()
+            if isinstance(value, float) and not math.isfinite(value):
+                return [f"{location}: number must be finite"]
+            if isinstance(value, dict):
+                pending.extend((f"{location}.{key}", child) for key, child in value.items())
+            elif isinstance(value, list):
+                pending.extend((f"{location}[{index}]", child) for index, child in enumerate(value))
     root_schema = schema if root_schema is None else root_schema
     unknown_keywords = set(schema) - SUPPORTED
     if unknown_keywords:

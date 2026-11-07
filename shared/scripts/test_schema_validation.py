@@ -8,6 +8,15 @@ import schema_validation
 
 
 class SchemaSubsetValidatorTest(unittest.TestCase):
+    def test_nonfinite_numbers_are_rejected_even_in_open_objects(self):
+        for raw in ("NaN", "Infinity", "-Infinity", "1e999"):
+            value = json.loads(raw)
+            for candidate, schema in ((value, {"type": "number", "exclusiveMinimum": 0}),
+                                      ({"open": [value]}, {"type": "object"})):
+                with self.subTest(raw=raw):
+                    self.assertTrue(schema_validation.validate(candidate, schema))
+        self.assertEqual(schema_validation.validate(0.5, {"type": "number", "exclusiveMinimum": 0}), [])
+
     def test_required_types_limits_unknowns_and_uniqueness(self):
         schema = {
             "type": "object",
