@@ -24,7 +24,7 @@ def report(field="action.name", status="untrusted", replacement=validator.BOUND_
         "policy": None,
         "readback": ["The rule requires human review."],
         "enforceability": [{
-            "rule_reference": "rule 1", "required_fact": "exact MCP tool identity", "field": field,
+            "rule_reference": "rules[0]", "required_fact": "exact MCP tool identity", "field": field,
             "surface": "managed_mcp", "provenance": PROVENANCE["fields"].get(field, "unresolved"), "status": status,
             "safe_outcome": "review", "reason": "The caller selects action.name.", "replacement_field": replacement,
         }],
@@ -47,6 +47,33 @@ def add_policy(candidate, field, action="allow"):
 
 
 class EnforceabilityValidatorTest(unittest.TestCase):
+    def test_rule_effects_readback_and_references_are_structurally_bound(self):
+        candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider", "allow")
+        candidate["enforceability"][0]["safe_outcome"] = "auto_allow"
+        candidate["readback"] = validator.derive_readback(candidate["policy"])
+        self.assertEqual(validate(candidate), [])
+        for key, value in (("readback", ["Requires review only"]), ("activation_effect", "narrows")):
+            altered = json.loads(json.dumps(candidate))
+            altered[key] = value
+            self.assertTrue(validate(altered), key)
+        for key, value in (("safe_outcome", "review"), ("rule_reference", "rules[99]")):
+            altered = json.loads(json.dumps(candidate))
+            altered["enforceability"][0][key] = value
+            self.assertTrue(validate(altered), key)
+        candidate["enforceability"].append(dict(candidate["enforceability"][0]))
+        self.assertTrue(any("duplicate" in error for error in validate(candidate)))
+
+    def test_model_dependency_has_a_positive_control_and_rejects_downgrade(self):
+        candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider", "deny_if_model_not_in")
+        candidate["policy"]["rules"][0]["params"] = {"allowed": ["example-model"]}
+        entry = candidate["enforceability"][0]
+        entry.update(surface="managed_execute", safe_outcome="deny")
+        candidate["enforceability"].append({**entry, "field": "model"})
+        candidate["readback"] = validator.derive_readback(candidate["policy"])
+        self.assertEqual(validate(candidate), [])
+        candidate["enforceability"][1]["status"] = "untrusted"
+        self.assertTrue(any("without independently trusted" in error for error in validate(candidate)))
+
     def test_implicit_action_facts_cannot_be_omitted_or_downgraded(self):
         candidate = add_policy(report(field="provider", status="trusted", replacement=None), "provider", "deny_if_model_not_in")
         candidate["policy"]["rules"][0]["params"] = {"allowed": ["example-model"]}

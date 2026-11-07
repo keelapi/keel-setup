@@ -37,6 +37,8 @@ ACTION_DEPENDENCIES: dict[str, tuple[str, ...] | None] = {
 
 def _action_dependencies(rule: dict[str, Any]) -> tuple[str, ...] | None:
     action = rule.get("action")
+    if not isinstance(action, str):
+        return None
     params = rule.get("params")
     if action == "deny_if_cost_exceeds" and (not isinstance(params, dict) or params.get("window") != "request"):
         return None  # Window spend is not a published field/capability contract.
@@ -67,6 +69,23 @@ def _condition_fields(condition: Any) -> list[str]:
     return fields
 
 
+def derive_readback(policy: dict[str, Any]) -> list[str]:
+    """Canonical readback binds every condition, parameter and requirement."""
+    return [f"Rule {index + 1}: {json.dumps(rule, sort_keys=True, ensure_ascii=False)}"
+            for index, rule in enumerate(policy.get("rules", []))]
+
+
+def _safe_outcome(rule: dict[str, Any]) -> str:
+    action = rule.get("action")
+    if action == "allow":
+        return "review" if rule.get("approval_requirement") else "auto_allow"
+    if action == "require_human_review":
+        return "review"
+    if action == "deny" or str(action).startswith("deny_if_"):
+        return "deny"
+    return "proposal_only"
+
+
 def validate(
     report: Any,
     manifest: dict[str, Any],
@@ -89,13 +108,15 @@ def validate(
         failures.append("pinned field-provenance artifact does not exactly cover the published field set")
 
     entries = report.get("enforceability") if isinstance(report.get("enforceability"), list) else []
-    by_field: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    by_rule_field: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = {}
     for index, item in enumerate(entries):
         if not isinstance(item, dict):
             continue
         field = item.get("field")
         if isinstance(field, str):
-            by_field.setdefault(field, []).append((index, item))
+            reference = item.get("rule_reference")
+            if isinstance(reference, str):
+                by_rule_field.setdefault((reference, field), []).append((index, item))
         status = item.get("status")
         pinned_provenance = provenance.get(field) if isinstance(field, str) else None
         if isinstance(field, str) and field not in public_fields:
@@ -120,6 +141,18 @@ def validate(
     if policy is not None:
         failures.extend(validate_schema(policy, policy_schema, "$.policy"))
     rules = policy.get("rules") if isinstance(policy, dict) else []
+    if isinstance(policy, dict) and isinstance(rules, list):
+        if report.get("readback") != derive_readback(policy):
+            failures.append("readback must exactly match the structurally derived policy rules")
+        # Without an active-policy baseline or runtime composition, a draft
+        # cannot establish narrowing, widening, or unchanged activation.
+        if report.get("activation_effect") != "unresolved":
+            failures.append("activation_effect must be unresolved without an authenticated active-policy baseline")
+        expected_refs = {f"rules[{index}]" for index in range(len(rules))}
+        for entry_index, item in enumerate(entries):
+            if isinstance(item, dict) and (not isinstance(item.get("rule_reference"), str)
+                                          or item["rule_reference"] not in expected_refs):
+                failures.append(f"enforceability[{entry_index}] must reference exactly one existing rules[index]")
     if isinstance(rules, list):
         for rule_index, rule in enumerate(rules):
             if not isinstance(rule, dict):
@@ -132,8 +165,16 @@ def validate(
                 failures.append(f"policy.rules[{rule_index}] implicit runtime facts/capabilities have no pinned trusted evidence contract")
                 dependencies = ()
             fields = sorted(set(fields) | set(dependencies))
+            reference = f"rules[{rule_index}]"
+            for entry_index, item in enumerate(entries):
+                if not isinstance(item, dict) or item.get("rule_reference") != reference:
+                    continue
+                if item.get("field") not in fields:
+                    failures.append(f"enforceability[{entry_index}] fact is not consumed by the referenced rule")
+                if item.get("safe_outcome") != _safe_outcome(rule):
+                    failures.append(f"enforceability[{entry_index}] safe_outcome disagrees with the referenced action")
             for field in fields:
-                matching = by_field.get(field, [])
+                matching = by_rule_field.get((reference, field), [])
                 if not matching:
                     failures.append(f"policy.rules[{rule_index}] field {field!r} has no enforceability entry")
                     continue

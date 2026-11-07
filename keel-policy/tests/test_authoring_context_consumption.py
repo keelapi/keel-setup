@@ -253,12 +253,12 @@ class JourneyTests(unittest.TestCase):
             'schema_version': '1.0',
             'intent': ['Only this selected provider/model pair may run in this dedicated summarizer project; accept blocking the old default.'],
             'policy': policy,
-            'readback': ['Deny other providers first.', 'Then deny models outside the selected list for this provider. The old default is blocked.'],
-            'enforceability': [dict(rule_reference='rules 1-2', required_fact=field,
+            'readback': validator.derive_readback(policy),
+            'enforceability': [dict(rule_reference=f'rules[{index}]', required_fact=field,
                 field=field, surface='managed_execute', provenance='keel_derived',
                 status='trusted', safe_outcome='deny', reason='Published Keel-derived model/provider contract.', replacement_field=None)
-                for field in ('provider', 'model')],
-            'activation_effect': 'narrows', 'blocked_requests': [],
+                for index, field in ((0, 'provider'), (1, 'provider'), (1, 'model'))],
+            'activation_effect': 'unresolved', 'blocked_requests': [],
             'human_next_step': out['handoff'],
         }
         failures = validator.validate(report, read('tools/public_surface.json'),

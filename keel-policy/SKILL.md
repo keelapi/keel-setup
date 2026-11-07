@@ -88,7 +88,15 @@ Choose one explicit mode and keep one intent ledger across it:
 Each handoff contains: the human intent, policy JSON when one can be drafted faithfully, an
 evaluation-order readback, an enforceability report, the activation effect (`narrows`, `widens`,
 `ambiguous`, `unchanged`, or `unresolved`), blocked requests, and the exact human next step. Validate an
-enforceability report with `scripts/validate_enforceability_report.py`. A blocked report is a successful
+enforceability report with `scripts/validate_enforceability_report.py`. For an embedded policy, use
+`rules[0]`, `rules[1]`, and so on as exact rule references, with one entry for each fact consumed by
+each rule. The machine report's `readback` must equal the validator's `derive_readback(policy)`;
+keep any additional friendly explanation outside that validated field. `safe_outcome` must agree
+with the referenced action. Keep `activation_effect` as `unresolved` without an authenticated active
+policy baseline. Human `intent` remains a declaration for human review, not a proved policy effect.
+Actions whose implicit runtime facts or capabilities lack a pinned trusted evidence contract cannot
+pass offline enforceability qualification; report the missing contract instead of claiming support.
+A blocked report is a successful
 diagnosis; never change the requested restriction to make validation pass.
 
 Every non-null embedded `policy` is validated against the committed
