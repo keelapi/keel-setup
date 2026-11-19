@@ -6,12 +6,20 @@ table — re-apply it if you regenerate.
 
 **`CATALOG_VERSION` does not move when a field's provenance does.** Five financial fields were
 demoted from `keel_derived` to `caller_asserted` under this same version string, and the stale
-table below gave no sign of it. Re-check provenance against the published field-provenance map
-for your release rather than trusting the version to signal drift.
+table below gave no sign of it. The three `action.attributes.trusted_facts.*` fields were later
+demoted from `connector_asserted` to `caller_asserted`, again under the same version. Re-check
+provenance against the published field-provenance map for your release rather than trusting the
+version to signal drift.
 
 Use **only** fields marked authorable = yes. Fields with provenance `caller_asserted` are
-supplied by the caller and are not trustworthy evidence — Keel rejects allow/deny rules that
-gate on spoofable identity fields.
+supplied by the caller and are not trustworthy evidence. Keel rejects allow/deny rules that
+gate on spoofable *agent-identity* claims (`subject.*`, `*.agent_id`, `*.agent_name`); it does
+**not** reject rules on other `caller_asserted` fields, so a rule on one of them is saved and
+can be satisfied by whatever the caller sends.
+
+**`action.attributes.trusted_facts.*` is caller-supplied. Do not use these fields as evidence to
+authorize an action.** They are listed below only so existing rules on them can be recognized
+and corrected; see §.
 
 `context._keel.action_envelope.*` is generally the strongest family available, but **it is not
 uniformly Keel-established.** The connector, authority and pricing facts are `keel_derived`.
@@ -116,9 +124,9 @@ before relying on it; see *Still moving underneath* above. Provenance `caller_as
 
 | field | type | authorable | provenance |
 |---|---|---|---|
-| `action.attributes.trusted_facts.environment` | string | yes | connector_asserted |
-| `action.attributes.trusted_facts.max_uses` | integer | yes | connector_asserted |
-| `action.attributes.trusted_facts.tool_name` | string | yes | connector_asserted |
+| `action.attributes.trusted_facts.environment` § | string | yes | caller_asserted |
+| `action.attributes.trusted_facts.max_uses` § | integer | yes | caller_asserted |
+| `action.attributes.trusted_facts.tool_name` § | string | yes | caller_asserted |
 | `action.name` | string | yes | caller_asserted |
 | `attrs.estimated_input_tokens` | integer | yes | caller_asserted |
 | `attrs.estimated_output_tokens` | integer | yes | caller_asserted |
@@ -180,6 +188,15 @@ Permit payment rail's caller-declared, dispatch-bound amount. Read the server-st
 `context._keel.payment_fact_trust` value: `work_authority_bound`, `keel_verified`,
 `request_bound`, or `unavailable`. None of these values proves provider completion. The flat
 amount still has no companion `.state`; prefer the envelope pair when an absence guard matters.
+
+§ `action.attributes.trusted_facts.*` is caller-supplied. Do not use these fields as evidence to
+authorize an action. Keel fills the object on its own managed MCP path, but on the public Permit
+route the caller writes it, so an `allow` rule on one of these paths is satisfied by a request
+Keel never verified, and Keel's validator does not refuse such a rule. If an existing policy
+grants on one of them, replace the condition: for the exact MCP tool, use
+`context._keel.action_envelope.connector.tool_name.value`. `max_uses` is enforced by Keel's
+dispatch lifecycle from the verified value, not from this path. Other paths under
+`action.attributes.trusted_facts` are not published for authoring.
 
 `budget_envelope_id` is selected by the caller and enters policy evaluation before Keel
 resolves and reserves the project-scoped envelope on the allow path. A condition on the ID is

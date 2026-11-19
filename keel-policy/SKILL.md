@@ -551,8 +551,13 @@ blocked needs an explicit deny.
 ending in `_usd_micros` are integers. Writing `100` there means one hundredth of a cent.
 
 **Only use fields from `reference/fields.md`.** Keel rejects unknown fields. Fields marked
-provenance `caller_asserted` are supplied by the caller and are not trustworthy evidence — Keel
-refuses allow/deny rules that gate on spoofable identity fields. The
+provenance `caller_asserted` are supplied by the caller and are not trustworthy evidence. Keel
+refuses allow/deny rules that gate on spoofable agent-identity claims (`subject.*`,
+`*.agent_id`, `*.agent_name`) but accepts rules on every other `caller_asserted` field, so a saved
+rule is no sign that its field is safe to grant on.
+**`action.attributes.trusted_facts.*` is caller-supplied. Do not use these fields as evidence to
+authorize an action.** When an existing policy grants on one of them, report it `untrusted` and
+propose the server-derived replacement. The
 `context._keel.action_envelope.*` fields are generally the strongest available, but **the family
 is not uniformly Keel-established**: its connector, authority and pricing facts are
 `keel_derived`, while its financial facts are `caller_asserted` because on Keel's canonical
@@ -575,8 +580,9 @@ Do not use `action.name` as the identity of an MCP tool. It is published as `cal
 exact MCP tool match, use the server-derived field
 `context._keel.action_envelope.connector.tool_name.value`, usually scoped with
 `context._keel.action_envelope.connector.identity.value`. Do not substitute
-`action.attributes.trusted_facts.tool_name`; it is `connector_asserted`, and publication status must
-always be checked against the pinned `tools/public_surface.json`.
+`action.attributes.trusted_facts.tool_name`; despite its name it is `caller_asserted` (the caller
+writes it on the public Permit route), and publication status must always be checked against the
+pinned `tools/public_surface.json`.
 
 An enforceability report that encounters `action.name` must mark it `untrusted` and name
 `context._keel.action_envelope.connector.tool_name.value` as the replacement for the managed MCP
