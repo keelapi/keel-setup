@@ -551,8 +551,13 @@ blocked needs an explicit deny.
 ending in `_usd_micros` are integers. Writing `100` there means one hundredth of a cent.
 
 **Only use fields from `reference/fields.md`.** Keel rejects unknown fields. Fields marked
-provenance `caller_asserted` are supplied by the caller and are not trustworthy evidence — Keel
-refuses allow/deny rules that gate on spoofable identity fields. The
+provenance `caller_asserted` are supplied by the caller and are not trustworthy evidence. Keel
+refuses allow/deny rules that gate on spoofable agent-identity claims (`subject.*`,
+`*.agent_id`, `*.agent_name`) but accepts rules on every other `caller_asserted` field, so a saved
+rule is no sign that its field is safe to grant on.
+**`action.attributes.trusted_facts.*` is caller-supplied. Do not use these fields as evidence to
+authorize an action.** When an existing policy grants on one of them, report it `untrusted` and
+propose the server-derived replacement. The
 `context._keel.action_envelope.*` fields are generally the strongest available, but **the family
 is not uniformly Keel-established**: its connector, authority and pricing facts are
 `keel_derived`, while its financial facts are `caller_asserted` because on Keel's canonical
