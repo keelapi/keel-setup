@@ -575,8 +575,9 @@ Do not use `action.name` as the identity of an MCP tool. It is published as `cal
 exact MCP tool match, use the server-derived field
 `context._keel.action_envelope.connector.tool_name.value`, usually scoped with
 `context._keel.action_envelope.connector.identity.value`. Do not substitute
-`action.attributes.trusted_facts.tool_name`; it is `connector_asserted`, and publication status must
-always be checked against the pinned `tools/public_surface.json`.
+`action.attributes.trusted_facts.tool_name`; despite its name it is `caller_asserted` (the caller
+writes it on the public Permit route), and publication status must always be checked against the
+pinned `tools/public_surface.json`.
 
 An enforceability report that encounters `action.name` must mark it `untrusted` and name
 `context._keel.action_envelope.connector.tool_name.value` as the replacement for the managed MCP

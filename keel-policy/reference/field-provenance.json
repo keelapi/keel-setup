@@ -2,9 +2,9 @@
   "schema_version": "1.0",
   "source": "keel-policy/reference/fields.md at this release",
   "fields": {
-    "action.attributes.trusted_facts.environment": "connector_asserted",
-    "action.attributes.trusted_facts.max_uses": "connector_asserted",
-    "action.attributes.trusted_facts.tool_name": "connector_asserted",
+    "action.attributes.trusted_facts.environment": "caller_asserted",
+    "action.attributes.trusted_facts.max_uses": "caller_asserted",
+    "action.attributes.trusted_facts.tool_name": "caller_asserted",
     "action.name": "caller_asserted",
     "attrs.estimated_input_tokens": "caller_asserted",
     "attrs.estimated_output_tokens": "caller_asserted",

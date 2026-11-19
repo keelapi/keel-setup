@@ -184,9 +184,22 @@ class EnforceabilityValidatorTest(unittest.TestCase):
         self.assertTrue(any("caller_asserted field cannot be trusted" in item for item in failures))
         self.assertTrue(any("automatic action uses field" in item for item in failures))
 
-    def test_connector_asserted_value_cannot_be_trusted(self):
-        candidate = report(field="action.attributes.trusted_facts.max_uses", status="trusted", replacement=None)
+    def test_legacy_trusted_facts_path_is_caller_asserted_and_cannot_be_trusted(self):
+        field = "action.attributes.trusted_facts.max_uses"
+        self.assertEqual(PROVENANCE["fields"][field], "caller_asserted")
+        candidate = report(field=field, status="trusted", replacement=None)
         failures = validate(candidate)
+        self.assertTrue(any("caller_asserted field cannot be trusted" in item for item in failures))
+
+    def test_connector_asserted_value_cannot_be_trusted(self):
+        # No connector-asserted field is PUBLIC on this release, so pin the rule
+        # against a provenance map that labels one public field that way.
+        field = "action.attributes.trusted_facts.max_uses"
+        provenance = json.loads(json.dumps(PROVENANCE))
+        provenance["fields"][field] = "connector_asserted"
+        candidate = report(field=field, status="trusted", replacement=None)
+        candidate["enforceability"][0]["provenance"] = "connector_asserted"
+        failures = validator.validate(candidate, MANIFEST, provenance, SCHEMA, POLICY_SCHEMA)
         self.assertTrue(any("connector_asserted field cannot be trusted" in item for item in failures))
 
     def test_automatic_allow_with_empty_enforceability_is_rejected(self):

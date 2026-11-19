@@ -89,15 +89,15 @@
   "field_adjudications": {
     "action.attributes.trusted_facts.environment": {
       "decision": "PUBLIC",
-      "rationale": "Connector-asserted preflight environment is an authorable exact-match contract."
+      "rationale": "Caller-asserted preflight environment (the backend catalog demoted it from connector_asserted) stays authorable and is published with its weaker provenance; it is not evidence Keel established the environment."
     },
     "action.attributes.trusted_facts.max_uses": {
       "decision": "PUBLIC",
-      "rationale": "Connector-asserted numeric use limit is an authorable preflight contract."
+      "rationale": "Caller-asserted preflight use limit (the backend catalog demoted it from connector_asserted) stays authorable and is published with its weaker provenance; Keel's dispatch lifecycle enforces the verified value, not this path."
     },
     "action.attributes.trusted_facts.tool_name": {
       "decision": "PUBLIC",
-      "rationale": "Connector-asserted preflight tool name is required by the shipped refund policy pattern."
+      "rationale": "Caller-asserted preflight tool name (the backend catalog demoted it from connector_asserted) stays authorable and is published with its weaker provenance; the shipped refund patterns use context._keel.action_envelope.connector.tool_name.value instead."
     },
     "attrs.estimated_input_tokens": {
       "decision": "PUBLIC",
