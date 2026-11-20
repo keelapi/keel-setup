@@ -32,6 +32,17 @@ class SchemaSubsetValidatorTest(unittest.TestCase):
         self.assertTrue(schema_validation.validate({"type": "approver_group", "timeout_seconds": 60,
             "group_id": identifier, "group_slug": "reviewers"}, schema))
 
+    def test_cost_windows_are_exactly_the_ones_keel_accepts(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        policy_schema = json.loads((root / "keel-policy/reference/policy-document.schema.json").read_text())
+        schema = policy_schema["$defs"]["DenyIfCostExceedsParams"]
+        accepted = ["minute", "hourly", "daily", "weekly", "monthly", "quarterly", "request"]
+        self.assertEqual(schema["properties"]["window"]["enum"], accepted)
+        for window in accepted:
+            self.assertEqual(schema_validation.validate({"window": window, "cap_micros": 100}, schema), [], window)
+        for window in ("second", "per_second", "hour", "rolling_hour", "yearly"):
+            self.assertTrue(schema_validation.validate({"window": window, "cap_micros": 100}, schema), window)
+
     def test_date_time_requires_an_unambiguous_rfc3339_instant(self):
         schema = {"type": "string", "format": "date-time"}
         for value in ("2026-11-06T12:00:00", "20261106T120000Z", "2026-11-06T12:00Z",
