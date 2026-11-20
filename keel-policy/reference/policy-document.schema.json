@@ -1034,6 +1034,8 @@
         },
         "window": {
           "enum": [
+            "minute",
+            "hourly",
             "daily",
             "weekly",
             "monthly",

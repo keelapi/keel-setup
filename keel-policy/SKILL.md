@@ -410,10 +410,22 @@ case. Handle it like this:
 `deny_if_cost_exceeds` is easy to describe more strongly than it behaves, and the two window
 kinds do not make the same promise. State the one that applies.
 
-**Windowed caps** — `daily`, `weekly`, `monthly`, `quarterly`. Keel tracks accumulated provider
+**Windowed caps** — `minute`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`.
+Keel tracks accumulated provider
 cost using reconciled actual usage for completed requests, and estimated exposure for requests
 still in flight. The historical part is what the provider actually charged, so the window
 self-corrects as requests complete.
+
+Every windowed cap is a **fixed window aligned to the UTC clock** — the clock minute, the clock
+hour, the UTC day, a Monday-start week, the calendar month or quarter — not a sliding one. An
+`hourly` cap resets at the top of each UTC hour; it is not "in any 60 minutes". Read it back that
+way, and if the user means a rolling period, say that Keel's cost windows do not express one
+rather than encoding it as if they did. A short window can settle above its cap: a request counts
+in the window it was admitted in until its usage is reported, then in the window the report
+arrived in, so calls in flight when a window opens add to it. There is no per-second cost window.
+Below a minute, the request-count controls work: `deny_if_rate_exceeds`, and
+`throttle_if_rate_exceeds` outside `basic`. They count requests over a sliding `window_seconds`,
+not money.
 
 **Per-request caps** — `window: "request"`. Keel makes the decision before provider dispatch
 using a conservative cost estimate. There is no accumulated history to correct it, so the
@@ -439,6 +451,36 @@ upper bound across every supported request shape, and "maximum" would promise ex
 `constrain_max_output_tokens` is a **length control**. It caps how long a response may be, which
 narrows the range of possible costs, but it is not itself a cost control and does not make the
 final cost predictable. Offer it for what it does.
+
+## What a review timeout does
+
+A held request has one review deadline, and Keel enforces it when the decision is recorded. An
+approval or a rejection at or after the deadline is refused with a 409
+(`review_window_elapsed`, or `conflict` once Keel has already closed the hold): no vote is
+recorded, nothing runs, the hold expires, and the request has to be made again for a fresh review.
+A late approval never lets the action through.
+
+The review window comes from one place:
+
+- the rule's own `timeout_seconds`, on its `approval_requirement` or `require_attestation` (when a
+  rule carries both, the `approval_requirement` value wins); otherwise
+- the project's default review window. A `require_human_review` that names no approver uses it.
+  Until the project sets its own (from 300 seconds to 7 days), it is Keel's default of 600 seconds.
+
+The deadline is that window or the end of the Permit's own lifetime, whichever comes first — for
+example a `constrain_permit_lifetime` limit or the request's own expiry. So read `timeout_seconds`
+back as the most time the approver has, after which the action does not run: "an approver has up
+to one hour; after that the refund does not happen and must be requested again". It is still the
+user's value under invariant 3. Do not choose it, and do not move it towards Keel's default.
+
+A `require_human_review` with no approver needs no `timeout_seconds`, but it is not a way around
+state 2. It makes two choices for the user: the window (the project's default) and the approver
+(the project owner, or the organization's `owner` role when the project has no owner). Write it
+only when the user accepts both; otherwise ask for the timeout. In the readback, name who approves
+and say the review closes after the project's review window, which is 10 minutes unless the project
+has set another. You cannot see which, so never state a number as that project's setting. The
+project default belongs to a project owner or an organization owner or admin; the agent does not
+change it.
 
 ## What requires a user decision
 
